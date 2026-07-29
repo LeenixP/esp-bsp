@@ -1,0 +1,15 @@
+description: BSP Display USB HID Example
+
+dependencies:
+  m5stack_tab5:
+    version: '*'
+
+  usb_host_hid:
+    version: '^1'
+    matches:
+    - if: $CONFIG{EX_USB_STACK_IDF} == 1
+
+  cherry-embedded/cherryusb:
+    version: '^1'
+    matches:
+    - if: $CONFIG{EX_USB_STACK_CHERRYUSB} == 1
