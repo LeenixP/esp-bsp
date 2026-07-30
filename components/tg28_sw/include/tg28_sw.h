@@ -12,6 +12,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "driver/i2c_master.h"
@@ -23,6 +24,12 @@ extern "C" {
 
 #define TG28_SW_I2C_ADDRESS_DEFAULT  0x34
 #define TG28_SW_I2C_CLOCK_HZ         400000
+
+#define TG28_SW_POWER_KEY_IRQ_POSITIVE_EDGE  (1U << 0)
+#define TG28_SW_POWER_KEY_IRQ_NEGATIVE_EDGE  (1U << 1)
+#define TG28_SW_POWER_KEY_IRQ_LONG_PRESS      (1U << 2)
+#define TG28_SW_POWER_KEY_IRQ_SHORT_PRESS     (1U << 3)
+#define TG28_SW_POWER_KEY_IRQ_ALL             0x0F
 
 /** Opaque TG28 switch-charger device handle. */
 typedef struct tg28_sw_device_t *tg28_sw_handle_t;
@@ -47,6 +54,9 @@ typedef enum {
 typedef struct {
     uint8_t device_address;
     uint32_t scl_speed_hz;
+    /** Optional battery-specific model downloaded through REGA1 on create. */
+    const uint8_t *battery_model;
+    size_t battery_model_size;
 } tg28_sw_config_t;
 
 /** Default TG28 switch-charger I2C configuration. */
@@ -54,6 +64,8 @@ typedef struct {
     {                                               \
         .device_address = TG28_SW_I2C_ADDRESS_DEFAULT, \
         .scl_speed_hz = TG28_SW_I2C_CLOCK_HZ,       \
+        .battery_model = NULL,                      \
+        .battery_model_size = 0,                    \
     }
 
 /** Power, battery, and charger snapshot. */
@@ -91,6 +103,34 @@ bool tg28_sw_is_supported_chip_id(uint8_t chip_id);
 
 /** Read power, battery, and charger state. */
 esp_err_t tg28_sw_get_status(tg28_sw_handle_t handle, tg28_sw_status_t *status);
+
+/** Read the raw power-on source bitmap from REG20. */
+esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source);
+
+/** Explicitly configure the four REG41 power-key interrupt enable bits. */
+esp_err_t tg28_sw_configure_power_key_interrupts(tg28_sw_handle_t handle,
+        uint8_t enabled_mask);
+
+/** Select the board's externally fixed TS input and disable its current source. */
+esp_err_t tg28_sw_configure_external_fixed_ts(tg28_sw_handle_t handle);
+
+/** Set an exactly representable REG62 constant-current charge limit. */
+esp_err_t tg28_sw_set_charge_current(tg28_sw_handle_t handle, uint16_t milliamps);
+
+/** Read the REG62 constant-current charge limit. */
+esp_err_t tg28_sw_get_charge_current(tg28_sw_handle_t handle, uint16_t *milliamps);
+
+/**
+ * Download and verify a battery-specific fuel-gauge model through REGA1.
+ *
+ * The sequence follows the vendor reference driver: temporarily disable the
+ * charger, reset the gauge MCU, open BROM, stream the model, reopen BROM for
+ * verification, set the update mark, reset the gauge MCU, and restore the
+ * original charger-enable state. Call once per boot, or pass the model in the
+ * create configuration to have the driver do so automatically.
+ */
+esp_err_t tg28_sw_program_battery_model(tg28_sw_handle_t handle,
+                                        const uint8_t *model, size_t size);
 
 /** Set one regulator to an exactly representable voltage. */
 esp_err_t tg28_sw_regulator_set_voltage(tg28_sw_handle_t handle,

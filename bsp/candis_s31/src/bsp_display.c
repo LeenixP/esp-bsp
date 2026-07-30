@@ -25,6 +25,13 @@ static bsp_lcd_handles_t s_display;
 static bool s_spi_initialized;
 static esp_lcd_touch_handle_t s_touch;
 static esp_lcd_panel_io_handle_t s_touch_io;
+static bool s_deep_standby;
+
+#define CO5300_CMD_DEEP_STANDBY_ON       0x4F
+#define CO5300_DEEP_STANDBY_PARAMETER    0x01
+#define CO5300_SLEEP_TRANSITION_MS       120
+#define CO5300_DEEP_WAKE_RESET_LOW_MS    5
+#define CO5300_RESET_RELEASE_MS          5
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 static lv_display_t *s_lvgl_display;
@@ -182,6 +189,7 @@ fail:
 
 void bsp_display_delete(void)
 {
+    s_deep_standby = false;
     if (s_display.panel != NULL) {
         esp_lcd_panel_disp_on_off(s_display.panel, false);
         esp_lcd_panel_del(s_display.panel);
@@ -424,23 +432,75 @@ esp_err_t bsp_display_enter_sleep(void)
             return touch_error;
         }
     }
-    return esp_lcd_panel_io_tx_param(s_display.io, LCD_CMD_SLPIN, NULL, 0);
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io, LCD_CMD_SLPIN,
+                        NULL, 0), TAG, "display sleep-in failed");
+    vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
+    return ESP_OK;
 }
 
 esp_err_t bsp_display_exit_sleep(void)
 {
     ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "display is not initialized");
+    ESP_RETURN_ON_FALSE(!s_deep_standby, ESP_ERR_INVALID_STATE, TAG,
+                        "display is in deep standby");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io, LCD_CMD_SLPOUT,
                         NULL, 0),
                         TAG, "display sleep-out failed");
-    vTaskDelay(pdMS_TO_TICKS(120));
+    vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
     if (s_touch != NULL) {
         const esp_err_t touch_error = esp_lcd_touch_exit_sleep(s_touch);
         if (touch_error != ESP_OK && touch_error != ESP_ERR_NOT_SUPPORTED) {
             return touch_error;
         }
     }
+    return bsp_display_backlight_on();
+}
+
+esp_err_t bsp_display_enter_deep_standby(void)
+{
+    ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "display is not initialized");
+    if (s_deep_standby) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(bsp_display_enter_sleep(), TAG,
+                        "display sleep-in before deep standby failed");
+    const uint8_t parameter = CO5300_DEEP_STANDBY_PARAMETER;
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io,
+                        CO5300_CMD_DEEP_STANDBY_ON, &parameter,
+                        sizeof(parameter)), TAG,
+                        "display deep-standby command failed");
+    s_deep_standby = true;
+    return ESP_OK;
+}
+
+esp_err_t bsp_display_exit_deep_standby(void)
+{
+    ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "display is not initialized");
+    if (!s_deep_standby) {
+        return ESP_OK;
+    }
+
+    ESP_RETURN_ON_ERROR(gpio_set_level(BSP_LCD_RST, 0), TAG,
+                        "display deep-wake reset assert failed");
+    vTaskDelay(pdMS_TO_TICKS(CO5300_DEEP_WAKE_RESET_LOW_MS));
+    ESP_RETURN_ON_ERROR(gpio_set_level(BSP_LCD_RST, 1), TAG,
+                        "display deep-wake reset release failed");
+    vTaskDelay(pdMS_TO_TICKS(CO5300_RESET_RELEASE_MS));
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_display.panel), TAG,
+                        "display reinitialization failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_display.panel,
+                        BSP_LCD_X_GAP, BSP_LCD_Y_GAP), TAG,
+                        "display gap restore failed");
+    if (s_touch != NULL) {
+        const esp_err_t touch_error = esp_lcd_touch_exit_sleep(s_touch);
+        if (touch_error != ESP_OK && touch_error != ESP_ERR_NOT_SUPPORTED) {
+            return touch_error;
+        }
+    }
+    s_deep_standby = false;
     return bsp_display_backlight_on();
 }
 #endif

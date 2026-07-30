@@ -34,7 +34,19 @@ esp_err_t bsp_pmic_init(void)
         .device_address = BSP_TG28_SW_I2C_ADDRESS,
         .scl_speed_hz = TG28_SW_I2C_CLOCK_HZ,
     };
-    return tg28_sw_create(bus, &config, &s_pmic);
+    esp_err_t error = tg28_sw_create(bus, &config, &s_pmic);
+    if (error == ESP_OK) {
+        error = tg28_sw_configure_power_key_interrupts(s_pmic,
+                                                       TG28_SW_POWER_KEY_IRQ_ALL);
+    }
+    if (error == ESP_OK) {
+        error = tg28_sw_configure_external_fixed_ts(s_pmic);
+    }
+    if (error != ESP_OK && s_pmic != NULL) {
+        tg28_sw_delete(s_pmic);
+        s_pmic = NULL;
+    }
+    return error;
 }
 
 esp_err_t bsp_pmic_deinit(void)
@@ -67,6 +79,30 @@ esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status)
     status->charging = device_status.charging;
     status->charge_done = device_status.charge_done;
     return ESP_OK;
+}
+
+esp_err_t bsp_pmic_get_power_on_source(uint8_t *source)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_power_on_source(s_pmic, source);
+}
+
+esp_err_t bsp_pmic_set_charge_current(uint16_t milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_charge_current(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_charge_current(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_program_battery_model(s_pmic, model, size);
 }
 
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator,

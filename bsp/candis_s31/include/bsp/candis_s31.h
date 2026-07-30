@@ -196,7 +196,7 @@
 /** @} */
 
 /** @addtogroup g12_camera
- *  @brief Supported camera sensors: OV3660.
+ *  @brief Supported camera sensors: OV5640.
  *  @{
  */
 #define BSP_CAMERA_RST                         GPIO_NUM_39
@@ -453,6 +453,10 @@ const char *bsp_peripheral_name(bsp_peripheral_t peripheral);
 esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
+esp_err_t bsp_pmic_get_power_on_source(uint8_t *source);
+esp_err_t bsp_pmic_set_charge_current(uint16_t milliamps);
+esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps);
+esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size);
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_t millivolts);
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);
 esp_err_t bsp_pmic_regulator_enable(bsp_pmic_regulator_t regulator, bool enable);
@@ -558,6 +562,8 @@ void bsp_display_unlock(void);
 void bsp_display_rotate(lv_display_t *display, lv_display_rotation_t rotation);
 esp_err_t bsp_display_enter_sleep(void);
 esp_err_t bsp_display_exit_sleep(void);
+esp_err_t bsp_display_enter_deep_standby(void);
+esp_err_t bsp_display_exit_deep_standby(void);
 /** @} */
 #endif
 

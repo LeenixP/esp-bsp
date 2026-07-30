@@ -15,8 +15,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define CST820_TOUCH_COUNT_REG          (0x02)
-#define CST820_TOUCH_DATA_REG           (0x03)
+#define CST820_TOUCH_REPORT_REG         (0x00)
+#define CST820_TOUCH_REPORT_SIZE        (15)
+#define CST820_TOUCH_COUNT_OFFSET       (2)
+#define CST820_FIRST_POINT_OFFSET       (3)
 #define CST820_CHIP_ID_REG              (0xA7)
 #define CST820_MAX_TOUCH_POINTS         (2)
 #define CST820_TOUCH_RECORD_SIZE        (6)
@@ -107,10 +109,15 @@ static esp_err_t esp_lcd_touch_cst820_read_data(esp_lcd_touch_handle_t tp)
 {
     ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");
 
-    uint8_t point_num = 0;
-    ESP_RETURN_ON_ERROR(touch_cst820_i2c_read(tp, CST820_TOUCH_COUNT_REG, &point_num, sizeof(point_num)),
-                        TAG, "Touch count read failed");
-    point_num &= CST820_TOUCH_COUNT_MASK;
+    /*
+     * CST820 supplier firmware exposes one 15-byte report at 0x00. Byte 2 is
+     * the point count and the two coordinate slots begin at bytes 3 and 9.
+     * Read that native report directly; do not probe or alias CST816 layouts.
+     */
+    uint8_t data[CST820_TOUCH_REPORT_SIZE] = {0};
+    ESP_RETURN_ON_ERROR(touch_cst820_i2c_read(tp, CST820_TOUCH_REPORT_REG,
+                        data, sizeof(data)), TAG, "Touch report read failed");
+    uint8_t point_num = data[CST820_TOUCH_COUNT_OFFSET] & CST820_TOUCH_COUNT_MASK;
 
     if (point_num == 0) {
         touch_cst820_clear_points(tp);
@@ -123,20 +130,11 @@ static esp_err_t esp_lcd_touch_cst820_read_data(esp_lcd_touch_handle_t tp)
     }
 
     point_num = point_num > CONFIG_ESP_LCD_TOUCH_MAX_POINTS ? CONFIG_ESP_LCD_TOUCH_MAX_POINTS : point_num;
-    /*
-     * Each point uses the common CST8xx six-byte report format:
-     * XH, XL, YH, YL, weight and area. The event is stored in XH[7:6]
-     * and the tracking ID in YH[7:4]. CST820 does not document pressure,
-     * so the last two bytes are intentionally ignored.
-     */
-    uint8_t data[CST820_MAX_TOUCH_POINTS * CST820_TOUCH_RECORD_SIZE] = {0};
-    ESP_RETURN_ON_ERROR(touch_cst820_i2c_read(tp, CST820_TOUCH_DATA_REG, data,
-                        point_num * CST820_TOUCH_RECORD_SIZE), TAG, "Touch data read failed");
 
     portENTER_CRITICAL(&tp->data.lock);
     tp->data.points = point_num;
     for (size_t i = 0; i < point_num; i++) {
-        const size_t offset = i * CST820_TOUCH_RECORD_SIZE;
+        const size_t offset = CST820_FIRST_POINT_OFFSET + i * CST820_TOUCH_RECORD_SIZE;
         tp->data.coords[i].x = ((uint16_t)(data[offset] & CST820_COORDINATE_HIGH_MASK) << 8) |
                                data[offset + 1];
         tp->data.coords[i].y = ((uint16_t)(data[offset + 2] & CST820_COORDINATE_HIGH_MASK) << 8) |

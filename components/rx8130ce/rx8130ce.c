@@ -8,15 +8,26 @@
 #include <string.h>
 
 #include "esp_check.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "rx8130ce.h"
 
 #define RX8130CE_REG_SECONDS          0x10
+#define RX8130CE_REG_ALARM_MINUTE     0x17
+#define RX8130CE_REG_EXTENSION        0x1C
 #define RX8130CE_REG_FLAGS            0x1D
 #define RX8130CE_REG_CONTROL0         0x1E
+#define RX8130CE_REG_CONTROL1         0x1F
+#define RX8130CE_REG_RAM              0x20
+#define RX8130CE_REG_DIGITAL_OFFSET   0x30
 #define RX8130CE_CONTROL0_STOP        (1U << 6)
+#define RX8130CE_CONTROL1_CHGEN       (1U << 5)
+#define RX8130CE_CONTROL1_INIEN       (1U << 4)
 #define RX8130CE_INTERRUPT_FLAGS      (RX8130CE_FLAG_UF | RX8130CE_FLAG_TF | RX8130CE_FLAG_AF)
 #define RX8130CE_TIMEOUT_MS           100
+#define RX8130CE_BACKUP_RECOVERY_MS   35
+#define RX8130CE_OSCILLATOR_START_MS  200
 
 struct rx8130ce_device_t {
     i2c_master_dev_handle_t i2c_device;
@@ -131,6 +142,59 @@ static void decode_status(uint8_t flags, rx8130ce_status_t *status)
     };
 }
 
+static esp_err_t rx8130ce_configure_primary_backup(rx8130ce_handle_t handle)
+{
+    uint8_t control1 = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL1,
+                                      &control1, 1), TAG,
+                        "backup control read failed");
+    control1 &= ~RX8130CE_CONTROL1_CHGEN;
+    control1 |= RX8130CE_CONTROL1_INIEN;
+    return rx8130ce_write(handle, RX8130CE_REG_CONTROL1, &control1, 1);
+}
+
+static esp_err_t rx8130ce_initialize_all_registers(rx8130ce_handle_t handle)
+{
+    /* Known-safe epoch: 2000-01-01 00:00:00, Saturday. */
+    static const uint8_t calendar[7] = {
+        0x00, 0x00, 0x00, 1U << 6, 0x01, 0x01, 0x00,
+    };
+    static const uint8_t alarm_timer_extension[6] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x04,
+    };
+    static const uint8_t ram[4] = {0};
+    const uint8_t control0_stopped = RX8130CE_CONTROL0_STOP;
+    const uint8_t control0_running = 0;
+    const uint8_t flags = 0;
+    const uint8_t control1 = RX8130CE_CONTROL1_INIEN;
+    const uint8_t digital_offset = 0;
+
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_CONTROL0,
+                                       &control0_stopped, 1), TAG,
+                        "initial counter stop failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_SECONDS,
+                                       calendar, sizeof(calendar)), TAG,
+                        "initial calendar write failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_ALARM_MINUTE,
+                                       alarm_timer_extension,
+                                       sizeof(alarm_timer_extension)), TAG,
+                        "alarm/timer initialization failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_FLAGS,
+                                       &flags, 1), TAG,
+                        "flag initialization failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_CONTROL1,
+                                       &control1, 1), TAG,
+                        "backup control initialization failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_RAM,
+                                       ram, sizeof(ram)), TAG,
+                        "RAM initialization failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_DIGITAL_OFFSET,
+                                       &digital_offset, 1), TAG,
+                        "digital offset initialization failed");
+    return rx8130ce_write(handle, RX8130CE_REG_CONTROL0,
+                          &control0_running, 1);
+}
+
 esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
                           const rx8130ce_config_t *config,
                           rx8130ce_handle_t *ret_handle)
@@ -153,8 +217,18 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
     esp_err_t error = i2c_master_bus_add_device(bus, &device_config,
                       &handle->i2c_device);
     if (error == ESP_OK) {
+        /* Covers the specified t_int after return from backup operation. */
+        vTaskDelay(pdMS_TO_TICKS(RX8130CE_BACKUP_RECOVERY_MS));
         uint8_t flags = 0;
         error = rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1);
+        if (error == ESP_OK && (flags & RX8130CE_FLAG_VLF) != 0) {
+            /* VLF requires initialization only after the oscillator's tSTA. */
+            vTaskDelay(pdMS_TO_TICKS(RX8130CE_OSCILLATOR_START_MS));
+            error = rx8130ce_initialize_all_registers(handle);
+        } else if (error == ESP_OK) {
+            /* Primary backup cell: enable switchover, never enable charging. */
+            error = rx8130ce_configure_primary_backup(handle);
+        }
     }
     if (error != ESP_OK) {
         if (handle->i2c_device != NULL) {

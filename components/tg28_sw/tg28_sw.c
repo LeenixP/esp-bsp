@@ -16,8 +16,14 @@
 
 #define TG28_SW_REG_COMMON_STATUS0       0x00
 #define TG28_SW_REG_CHIP_ID              0x03
+#define TG28_SW_REG_MODE                 0x17
+#define TG28_SW_REG_MODULE_ENABLE        0x18
+#define TG28_SW_REG_POWER_ON_SOURCE      0x20
 #define TG28_SW_REG_VBAT_H               0x34
+#define TG28_SW_REG_INT_ENABLE1          0x41
 #define TG28_SW_REG_INT_STATUS1          0x48
+#define TG28_SW_REG_TS_CONFIG            0x50
+#define TG28_SW_REG_CHARGE_CURRENT       0x62
 #define TG28_SW_REG_DCDC_ENABLE          0x80
 #define TG28_SW_REG_DCDC1_VOLTAGE        0x82
 #define TG28_SW_REG_DCDC2_VOLTAGE        0x83
@@ -31,13 +37,24 @@
 #define TG28_SW_REG_ALDO4_VOLTAGE        0x95
 #define TG28_SW_REG_BLDO1_VOLTAGE        0x96
 #define TG28_SW_REG_BLDO2_VOLTAGE        0x97
+#define TG28_SW_REG_BATTERY_MODEL        0xA1
+#define TG28_SW_REG_FUEL_GAUGE_CONTROL   0xA2
 #define TG28_SW_REG_SOC                  0xA4
 
 #define TG28_SW_VBUS_PRESENT_MASK        (1U << 5)
 #define TG28_SW_BATTERY_PRESENT_MASK     (1U << 3)
 #define TG28_SW_CHARGE_STATE_MASK        0x07
 #define TG28_SW_CHARGE_STATE_DONE        0x04
+#define TG28_SW_CHARGER_ENABLE_MASK      (1U << 1)
+#define TG28_SW_GAUGE_MCU_RESET_MASK     (1U << 2)
+#define TG28_SW_POWER_KEY_IRQ_MASK       0x0F
+#define TG28_SW_TS_EXTERNAL_FIXED_MASK   (1U << 4)
+#define TG28_SW_TS_CURRENT_ENABLE_MASK   (3U << 2)
+#define TG28_SW_CHARGE_CURRENT_MASK      0x1F
+#define TG28_SW_BROM_UPDATE_MARK_MASK    (1U << 4)
+#define TG28_SW_BROM_WRITER_ENABLE_MASK  (1U << 0)
 #define TG28_SW_REGISTER_TIMEOUT_MS      100
+#define TG28_SW_CHARGER_SETTLE_MS        1000
 #define TG28_SW_WRITE_BUFFER_SIZE        4
 
 typedef struct {
@@ -143,6 +160,49 @@ static esp_err_t update_bits(tg28_sw_handle_t handle, uint8_t reg,
     return write_registers(handle, reg, &current, sizeof(current));
 }
 
+static esp_err_t reset_gauge_mcu(tg28_sw_handle_t handle)
+{
+    ESP_RETURN_ON_ERROR(update_bits(handle, TG28_SW_REG_MODE,
+                                    TG28_SW_GAUGE_MCU_RESET_MASK,
+                                    TG28_SW_GAUGE_MCU_RESET_MASK),
+                        TAG, "fuel-gauge MCU reset assert failed");
+    return update_bits(handle, TG28_SW_REG_MODE,
+                       TG28_SW_GAUGE_MCU_RESET_MASK, 0);
+}
+
+static esp_err_t set_brom_writer(tg28_sw_handle_t handle, bool enable)
+{
+    return update_bits(handle, TG28_SW_REG_FUEL_GAUGE_CONTROL,
+                       TG28_SW_BROM_WRITER_ENABLE_MASK,
+                       enable ? TG28_SW_BROM_WRITER_ENABLE_MASK : 0);
+}
+
+static esp_err_t encode_charge_current(uint16_t milliamps, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    uint16_t value = 0;
+    if (milliamps <= 200) {
+        ESP_RETURN_ON_FALSE(milliamps % 25 == 0, ESP_ERR_INVALID_ARG,
+                            TAG, "charge current is not representable");
+        value = milliamps / 25;
+    } else {
+        ESP_RETURN_ON_FALSE(milliamps >= 300 && milliamps <= 1500 &&
+                            milliamps % 100 == 0,
+                            ESP_ERR_INVALID_ARG, TAG,
+                            "charge current is not representable");
+        value = 8 + (milliamps - 200) / 100;
+    }
+    *code = (uint8_t)value;
+    return ESP_OK;
+}
+
+static uint16_t decode_charge_current(uint8_t code)
+{
+    code &= TG28_SW_CHARGE_CURRENT_MASK;
+    return code <= 8 ? (uint16_t)code * 25 :
+           (uint16_t)(200 + (code - 8) * 100);
+}
+
 static esp_err_t encode_voltage(const regulator_config_t *config,
                                 uint16_t millivolts, uint8_t *code)
 {
@@ -201,7 +261,11 @@ esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
     const tg28_sw_config_t default_config = TG28_SW_CONFIG_DEFAULT();
     const tg28_sw_config_t *device_config = config != NULL ? config : &default_config;
     ESP_RETURN_ON_FALSE(device_config->device_address <= 0x7F &&
-                        device_config->scl_speed_hz > 0,
+                        device_config->scl_speed_hz > 0 &&
+                        ((device_config->battery_model == NULL &&
+                          device_config->battery_model_size == 0) ||
+                         (device_config->battery_model != NULL &&
+                          device_config->battery_model_size > 0)),
                         ESP_ERR_INVALID_ARG, TAG, "invalid I2C configuration");
 
     tg28_sw_handle_t handle = calloc(1, sizeof(*handle));
@@ -234,6 +298,17 @@ esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
     }
     if (!tg28_sw_is_supported_chip_id(chip_id)) {
         ESP_LOGW(TAG, "unexpected chip ID: 0x%02x", chip_id);
+    }
+
+    if (device_config->battery_model != NULL && device_config->battery_model_size > 0) {
+        error = tg28_sw_program_battery_model(handle, device_config->battery_model,
+                                               device_config->battery_model_size);
+        if (error != ESP_OK) {
+            i2c_master_bus_rm_device(handle->i2c_device);
+            vSemaphoreDelete(handle->lock);
+            free(handle);
+            return error;
+        }
     }
 
     *ret_handle = handle;
@@ -308,6 +383,154 @@ esp_err_t tg28_sw_get_status(tg28_sw_handle_t handle, tg28_sw_status_t *status)
 
     unlock_device(handle);
     return error;
+}
+
+esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source)
+{
+    ESP_RETURN_ON_FALSE(source != NULL, ESP_ERR_INVALID_ARG, TAG, "source is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_POWER_ON_SOURCE,
+                                           source, sizeof(*source));
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_configure_power_key_interrupts(tg28_sw_handle_t handle,
+        uint8_t enabled_mask)
+{
+    ESP_RETURN_ON_FALSE((enabled_mask & ~TG28_SW_POWER_KEY_IRQ_MASK) == 0,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid power-key IRQ mask");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_INT_ENABLE1,
+                                        TG28_SW_POWER_KEY_IRQ_MASK, enabled_mask);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_configure_external_fixed_ts(tg28_sw_handle_t handle)
+{
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const uint8_t mask = TG28_SW_TS_EXTERNAL_FIXED_MASK |
+                         TG28_SW_TS_CURRENT_ENABLE_MASK;
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_TS_CONFIG, mask,
+                                        TG28_SW_TS_EXTERNAL_FIXED_MASK);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_charge_current(tg28_sw_handle_t handle, uint16_t milliamps)
+{
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(encode_charge_current(milliamps, &code),
+                        TAG, "unsupported charge current");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_CHARGE_CURRENT,
+                                        TG28_SW_CHARGE_CURRENT_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_charge_current(tg28_sw_handle_t handle, uint16_t *milliamps)
+{
+    ESP_RETURN_ON_FALSE(milliamps != NULL, ESP_ERR_INVALID_ARG,
+                        TAG, "charge current is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t code = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_CHARGE_CURRENT,
+                                     &code, sizeof(code));
+    if (error == ESP_OK) {
+        code &= TG28_SW_CHARGE_CURRENT_MASK;
+        if (code > 21) {
+            ESP_LOGE(TAG, "reserved charge-current code: 0x%02x", code);
+            error = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *milliamps = decode_charge_current(code);
+        }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_program_battery_model(tg28_sw_handle_t handle,
+                                        const uint8_t *model, size_t size)
+{
+    ESP_RETURN_ON_FALSE(model != NULL && size > 0, ESP_ERR_INVALID_ARG,
+                        TAG, "battery model is empty");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+
+    uint8_t module_enable = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_MODULE_ENABLE,
+                                     &module_enable, sizeof(module_enable));
+    const bool module_state_valid = error == ESP_OK;
+    bool brom_open = false;
+    if (error == ESP_OK) {
+        const uint8_t charger_off = module_enable & ~TG28_SW_CHARGER_ENABLE_MASK;
+        error = write_registers(handle, TG28_SW_REG_MODULE_ENABLE,
+                                &charger_off, sizeof(charger_off));
+    }
+    if (error == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(TG28_SW_CHARGER_SETTLE_MS));
+        error = reset_gauge_mcu(handle);
+    }
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, false);
+    }
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, true);
+        brom_open = error == ESP_OK;
+    }
+    for (size_t i = 0; error == ESP_OK && i < size; ++i) {
+        error = write_registers(handle, TG28_SW_REG_BATTERY_MODEL,
+                                &model[i], sizeof(model[i]));
+    }
+
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, false);
+        brom_open = error != ESP_OK;
+    }
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, true);
+        brom_open = error == ESP_OK;
+    }
+    for (size_t i = 0; error == ESP_OK && i < size; ++i) {
+        uint8_t value = 0;
+        error = read_registers(handle, TG28_SW_REG_BATTERY_MODEL,
+                               &value, sizeof(value));
+        if (error == ESP_OK && value != model[i]) {
+            ESP_LOGE(TAG, "battery model verification failed at byte %u",
+                     (unsigned)i);
+            error = ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+
+    esp_err_t cleanup_error = ESP_OK;
+    if (brom_open) {
+        cleanup_error = set_brom_writer(handle, false);
+    }
+    if (error == ESP_OK && cleanup_error == ESP_OK) {
+        cleanup_error = update_bits(handle, TG28_SW_REG_FUEL_GAUGE_CONTROL,
+                                    TG28_SW_BROM_UPDATE_MARK_MASK,
+                                    TG28_SW_BROM_UPDATE_MARK_MASK);
+    }
+    /* Always reset the gauge MCU before restoring the charger, including on
+     * a failed download or verification, so it cannot remain in BROM state. */
+    const esp_err_t gauge_reset_error = reset_gauge_mcu(handle);
+    if (cleanup_error == ESP_OK) {
+        cleanup_error = gauge_reset_error;
+    }
+    const esp_err_t restore_error = module_state_valid ?
+                                    write_registers(handle,
+                                            TG28_SW_REG_MODULE_ENABLE,
+                                            &module_enable,
+                                            sizeof(module_enable)) : ESP_OK;
+    unlock_device(handle);
+    if (error != ESP_OK) {
+        return error;
+    }
+    if (cleanup_error != ESP_OK) {
+        return cleanup_error;
+    }
+    return restore_error;
 }
 
 esp_err_t tg28_sw_regulator_set_voltage(tg28_sw_handle_t handle,

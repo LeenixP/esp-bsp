@@ -32,7 +32,7 @@ must be confirmed during EVT bring-up before the component is released.
 |:heavy_check_mark:| :microphone: AUDIO_MIC |     es8389     |                                                                                                            |            |
 |:heavy_check_mark:|  :floppy_disk: SDCARD  |                |                                                     idf                                                    |    >=6.1   |
 |:heavy_check_mark:|       :bulb: LED       |                |   idf<br/>[espressif/led_indicator](https://components.espressif.com/components/espressif/led_indicator)   |>=6.1<br/>^2|
-|:heavy_check_mark:|     :camera: CAMERA    |     OV3660     |           [espressif/esp_video](https://components.espressif.com/components/espressif/esp_video)           |    ~2.2    |
+|:heavy_check_mark:|     :camera: CAMERA    |     OV5640     |           [espressif/esp_video](https://components.espressif.com/components/espressif/esp_video)           |    ~2.2    |
 |:heavy_check_mark:|      :battery: BAT     |                |                                                     idf                                                    |    >=6.1   |
 |        :x:       |    :video_game: IMU    |                |                                                                                                            |            |
 |        :x:       | :thermometer: HUMITURE |                |                                                                                                            |            |
@@ -82,9 +82,9 @@ buttons and SPIFFS content, is not listed.
 
 ## Camera module
 
-The connector exposes an 8-bit DVP bus and does not identify one permanently
-fitted sensor. The checked-in camera example selects OV3660 to match Espressif's
-ESP32-S31 reference setup. Select the corresponding `esp_cam_sensor` option if
+The connector exposes an 8-bit DVP bus. The production camera module uses an
+OV5640 with autofocus, and the checked-in camera example selects its
+800 x 600 RGB565 DVP mode. Select the corresponding `esp_cam_sensor` option if
 a different module is fitted.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)

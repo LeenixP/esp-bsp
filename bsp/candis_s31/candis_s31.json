@@ -110,7 +110,7 @@
             "name": "CAMERA",
             "enabled": ["true", "true"],
             "interface": "DVP",
-            "driver": "OV3660",
+            "driver": "OV5640",
             "BSP_CAMERA_XCLK_CLOCK_MHZ": "20",
             "pins": {
                 "BSP_CAMERA_GPIO_XCLK": "GPIO_NUM_55",

@@ -26,6 +26,8 @@ extern "C" {
 #define FUSB303B_I2C_CLOCK_HZ        400000
 #define FUSB303B_DEVICE_TYPE_VALUE   0x03
 #define FUSB303B_DEVICE_VERSION      0x01
+/** Minimum delay from active-low EN assertion to the first I2C access. */
+#define FUSB303B_ENABLE_TO_I2C_DELAY_MS 100
 
 /** Opaque FUSB303B device handle. */
 typedef struct fusb303b_device_t *fusb303b_handle_t;

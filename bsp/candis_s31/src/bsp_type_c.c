@@ -36,7 +36,7 @@ esp_err_t bsp_type_c_init(void)
     }
     ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_TYPE_C_CONTROL, true), TAG,
                         "FUSB303B enable failed");
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(pdMS_TO_TICKS(FUSB303B_ENABLE_TO_I2C_DELAY_MS));
 
     i2c_master_bus_handle_t bus = bsp_i2c_get_handle();
     if (bus == NULL) {

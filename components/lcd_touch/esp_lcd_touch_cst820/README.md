@@ -10,10 +10,12 @@ ESP-IDF driver for CST820 capacitive touch controllers. It uses the common
 | CST820 | I2C | `0x15` | 2 | [CST820 V1.2](https://admin.osptek.com/uploads/DS_CST_820_V1_2_e0543732ca.pdf) |
 
 The public CST820 datasheet describes the electrical interface but does not
-publish the complete touch report register map. Available CST820 modules also
-use different firmware revisions. This driver limits initialization to reset
-and an optional ID read; it does not change sleep, auto-sleep, or interrupt-mode
-registers.
+publish the complete touch report register map. This driver follows the
+15-byte report supplied with the display module: count in byte 2 and coordinate
+slots beginning at bytes 3 and 9. It does not probe CST816-family addresses,
+alias CST816 registers, or fall back to a CST816 compatibility path. Driver
+initialization is limited to reset and an optional ID read; it does not change
+sleep, auto-sleep, or interrupt-mode registers.
 
 If the controller is asleep or its firmware does not expose register `0xA7`,
 enable `CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID`. Touch data can still be

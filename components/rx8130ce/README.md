@@ -7,14 +7,22 @@ GPIO, backup supply, or board power policy.
 The current API covers the functions needed by board bring-up:
 
 - create and remove an RX8130CE device on an existing I2C bus;
+- initialize every user register after a voltage-loss (`VLF`) event;
 - validate, read, and set calendar time from 2000 through 2099;
 - decode retained voltage, reset, alarm, timer, and update flags;
 - read and clear the three interrupt flags that can assert `/IRQ`.
 
-Alarm programming, wake-up timer configuration, clock output, digital offset,
-and backup charging policy are intentionally outside the initial API. Those
+Alarm programming, wake-up timer configuration, clock output, and digital offset
+are intentionally outside the initial API. Those
 features need application-specific choices and should be added with tests when
 a board uses them.
+
+The board uses a primary backup cell. Device creation therefore always clears
+`CHGEN` and sets `INIEN`: automatic supply switchover is enabled, while backup
+battery charging is kept off. After `VLF=1`, the driver waits for oscillator
+startup and initializes all documented user registers. The calendar starts at
+the explicit recovery epoch 2000-01-01 00:00:00 (Saturday), and the application
+should set real time before relying on timestamps.
 
 ## Basic use
 
