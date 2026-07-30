@@ -75,9 +75,10 @@ Call `bsp_board_init()` first. It sets direct enables and optional rails to a
 disabled state; peripherals are initialized only when their individual BSP API
 is called. See [API.md](API.md) for resource ownership and shutdown rules.
 
-The reset and boot keys are wired to reset and strapping functions, not normal
-application GPIOs. `BSP_CAPS_BUTTONS` is therefore zero and the generic audio
-example, which expects application buttons and SPIFFS content, is not listed.
+The reset, power-on, and boot keys are dedicated to the reset path, PMIC, and
+boot strapping. They are not normal application GPIOs. `BSP_CAPS_BUTTONS` is
+therefore zero and the generic audio example, which expects application
+buttons and SPIFFS content, is not listed.
 
 ## Camera module
 
