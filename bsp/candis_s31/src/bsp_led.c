@@ -13,6 +13,9 @@ extern blink_step_t const *bsp_led_blink_defaults_lists[];
 
 static const char *TAG = "candis_led";
 
+/* The WS2812B is powered from the TG28 DC1SW output, which the schematic
+ * straps in fixed mode: the rail follows the main 3.3 V domain and needs
+ * no software control. */
 static const led_strip_config_t s_strip_config = {
     .strip_gpio_num = BSP_LED_RGB_IO,
     .max_leds = 1,
