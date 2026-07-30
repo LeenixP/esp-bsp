@@ -12,6 +12,7 @@ idf_component_register(
         esp_driver_sdspi
         esp_driver_spi
         esp_lcd
+        esp_lcd_touch
         fatfs
         vfs
     PRIV_REQUIRES
