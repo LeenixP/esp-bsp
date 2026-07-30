@@ -149,6 +149,19 @@ dependencies:
     matches:
       - if: $CONFIG{ESP32_S31_KORVO_1} == 1 && $CONFIG{BSP_SELECT_GLIB_SEL} == 1
 
+  candis_s31:
+    version: "*"
+    public: true
+    override_path: "../../bsp/candis_s31"
+    matches:
+      - if: $CONFIG{CANDIS_S31} == 1 && $CONFIG{BSP_SELECT_GLIB_SEL} == 1
+
+  candis_s31_noglib:
+    version: "*"
+    public: true
+    matches:
+      - if: $CONFIG{CANDIS_S31} == 1 && $CONFIG{BSP_SELECT_GLIB_SEL} != 1
+
   esp-box-3_noglib:
     version: "*"
     public: true

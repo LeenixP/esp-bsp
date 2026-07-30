@@ -9,5 +9,7 @@ examples:
       reason: Example depends on BSP, which is supported only for IDF >= 5.4
     - if: (IDF_VERSION < "5.5.0") and CONFIG_NAME in ["esp_vocat"]
       reason: Example depends on BSP, which is supported only for IDF >= 5.5 (Touch pad driver)
+    - if: (IDF_VERSION < "6.1.0") and CONFIG_NAME in ["candis_s31"]
+      reason: Candis-S31 depends on ESP32-S31 support from IDF >= 6.1
     - if: (IDF_VERSION >= "6.0.0") and CONFIG_NAME in ["esp32_lyrat"]
       reason: Example depends on BSP, which is supported only for IDF < 6.0 (LyraT incompatible Touch pad driver)

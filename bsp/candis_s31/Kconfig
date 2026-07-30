@@ -1,0 +1,86 @@
+menu "Board Support Package (Candis-S31)"
+
+    config BSP_ERROR_CHECK
+        bool "Enable error check in BSP"
+        default y
+        help
+            Abort on BSP initialization errors. Disable this option when the
+            application needs to handle and report initialization failures.
+
+    menu "I2C"
+        config BSP_I2C_NUM
+            int "Main I2C controller"
+            default 0
+            range 0 2
+            help
+                Controller used by the main bus on GPIO33 and GPIO34.
+
+        config BSP_LP_I2C_NUM
+            int "Low-power I2C controller"
+            default 1
+            range 0 2
+            help
+                Controller used by TG28_SW and RX8130CE on GPIO6 and GPIO7.
+
+        config BSP_I2C_INTERNAL_PULLUPS
+            bool "Enable internal I2C pull-ups"
+            default n
+            help
+                External pull-ups are fitted on the board. Enable this only
+                for controlled diagnostics.
+    endmenu
+
+    menu "Display"
+        config BSP_LCD_PIXEL_CLOCK_MHZ
+            int "CO5300 QSPI clock (MHz)"
+            default 40
+            range 10 40
+
+        config BSP_LCD_DRAW_BUF_HEIGHT
+            int "LVGL draw buffer height"
+            default 80
+            range 10 460
+
+        config BSP_LCD_DRAW_BUF_DOUBLE
+            bool "Use two LVGL draw buffers"
+            default y
+    endmenu
+
+    menu "Storage"
+        config BSP_SD_FORMAT_ON_MOUNT_FAIL
+            bool "Format SD card when mounting fails"
+            default n
+
+        config BSP_SD_MOUNT_POINT
+            string "SD card mount point"
+            default "/sdcard"
+    endmenu
+
+    menu "Audio"
+        config BSP_I2S_NUM
+            int "I2S controller"
+            default 0
+            range 0 2
+    endmenu
+
+    menu "Camera"
+        config BSP_CAMERA_XCLK_LEDC_CH
+            int "LEDC channel used for camera XCLK"
+            default 2
+            range 0 7
+    endmenu
+
+    menu "RGB LED"
+        choice BSP_LED_RGB_BACKEND
+            prompt "LED strip backend"
+            default BSP_LED_RGB_BACKEND_RMT
+
+            config BSP_LED_RGB_BACKEND_RMT
+                bool "RMT"
+
+            config BSP_LED_RGB_BACKEND_SPI
+                bool "SPI"
+        endchoice
+    endmenu
+
+endmenu
