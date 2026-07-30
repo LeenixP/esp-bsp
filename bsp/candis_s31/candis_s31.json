@@ -78,14 +78,14 @@
             "name": "SCREEN_TOUCH",
             "enabled": ["true", "true"],
             "interface": "I2C",
-            "driver": "kodediy/esp_lcd_touch_cst820",
+            "driver": "espressif/esp_lcd_touch_cst820",
             "pins": {
                 "BSP_LCD_TOUCH_INT": "GPIO_NUM_3",
                 "BSP_LCD_TOUCH_RST": "GPIO_NUM_17"
             },
             "BSP_FEATURE_TOUCH_TYPE": "",
             "DRIVER": "cst820",
-            "DRIVER_NAMESPACE": "kodediy",
+            "DRIVER_NAMESPACE": "espressif",
             "CFG": "ESP_LCD_TOUCH_IO_I2C_CST820_CONFIG()"
         },
         {
@@ -167,7 +167,7 @@
         {"name": "esp_codec_dev", "version": "~1.5", "public": "true", "min_idf": "5.0"},
         {"name": "espressif/esp_lvgl_port", "version": "^2", "public": "true", "min_idf": "5.1"},
         {"name": "espressif/esp_lcd_co5300", "version": "^2.0.3", "public": "false", "min_idf": "5.1"},
-        {"name": "kodediy/esp_lcd_touch_cst820", "version": "^1.0.1", "public": "false", "min_idf": "5.1"},
+        {"name": "espressif/esp_lcd_touch_cst820", "version": "^1.0.0", "public": "false", "min_idf": "5.2"},
         {"name": "esp_video", "version": "~2.2", "public": "true", "min_idf": "5.4"},
         {"name": "led_indicator", "version": "^2", "public": "true", "min_idf": "5.0"},
         {"name": "usb", "version": "^1", "public": "true", "min_idf": "5.1"}

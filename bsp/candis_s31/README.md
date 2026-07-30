@@ -20,22 +20,22 @@ must be confirmed during EVT bring-up before the component is released.
 <div align="center">
 <!-- START_DEPENDENCIES -->
 
-|     Available    |       Capability       |Controller/Codec|                                                          Component                                                         |   Version  |
-|------------------|------------------------|----------------|----------------------------------------------------------------------------------------------------------------------------|------------|
-|:heavy_check_mark:|     :pager: DISPLAY    |     co5300     |                                                             idf                                                            |    >=6.1   |
-|:heavy_check_mark:|:black_circle: LVGL_PORT|                |               [espressif/esp_lvgl_port](https://components.espressif.com/components/espressif/esp_lvgl_port)               |     ^2     |
-|:heavy_check_mark:|    :point_up: TOUCH    |     cst820     |[espressif/kodediy/esp_lcd_touch_cst820](https://components.espressif.com/components/espressif/kodediy/esp_lcd_touch_cst820)|   ^1.0.1   |
-|        :x:       | :radio_button: BUTTONS |                |                                                                                                                            |            |
-|        :x:       |   :white_circle: KNOB  |                |                                                                                                                            |            |
-|:heavy_check_mark:|  :musical_note: AUDIO  |                |               [espressif/esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev)               |    ~1.5    |
-|:heavy_check_mark:| :speaker: AUDIO_SPEAKER|     es8389     |                                                                                                                            |            |
-|:heavy_check_mark:| :microphone: AUDIO_MIC |     es8389     |                                                                                                                            |            |
-|:heavy_check_mark:|  :floppy_disk: SDCARD  |                |                                                             idf                                                            |    >=6.1   |
-|:heavy_check_mark:|       :bulb: LED       |                |           idf<br/>[espressif/led_indicator](https://components.espressif.com/components/espressif/led_indicator)           |>=6.1<br/>^2|
-|:heavy_check_mark:|     :camera: CAMERA    |     OV3660     |                   [espressif/esp_video](https://components.espressif.com/components/espressif/esp_video)                   |    ~2.2    |
-|:heavy_check_mark:|      :battery: BAT     |                |                                                             idf                                                            |    >=6.1   |
-|        :x:       |    :video_game: IMU    |                |                                                                                                                            |            |
-|        :x:       | :thermometer: HUMITURE |                |                                                                                                                            |            |
+|     Available    |       Capability       |Controller/Codec|                                                  Component                                                 |   Version  |
+|------------------|------------------------|----------------|------------------------------------------------------------------------------------------------------------|------------|
+|:heavy_check_mark:|     :pager: DISPLAY    |     co5300     |                                                     idf                                                    |    >=6.1   |
+|:heavy_check_mark:|:black_circle: LVGL_PORT|                |       [espressif/esp_lvgl_port](https://components.espressif.com/components/espressif/esp_lvgl_port)       |     ^2     |
+|:heavy_check_mark:|    :point_up: TOUCH    |     cst820     |[espressif/esp_lcd_touch_cst820](https://components.espressif.com/components/espressif/esp_lcd_touch_cst820)|   ^1.0.0   |
+|        :x:       | :radio_button: BUTTONS |                |                                                                                                            |            |
+|        :x:       |   :white_circle: KNOB  |                |                                                                                                            |            |
+|:heavy_check_mark:|  :musical_note: AUDIO  |                |       [espressif/esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev)       |    ~1.5    |
+|:heavy_check_mark:| :speaker: AUDIO_SPEAKER|     es8389     |                                                                                                            |            |
+|:heavy_check_mark:| :microphone: AUDIO_MIC |     es8389     |                                                                                                            |            |
+|:heavy_check_mark:|  :floppy_disk: SDCARD  |                |                                                     idf                                                    |    >=6.1   |
+|:heavy_check_mark:|       :bulb: LED       |                |   idf<br/>[espressif/led_indicator](https://components.espressif.com/components/espressif/led_indicator)   |>=6.1<br/>^2|
+|:heavy_check_mark:|     :camera: CAMERA    |     OV3660     |           [espressif/esp_video](https://components.espressif.com/components/espressif/esp_video)           |    ~2.2    |
+|:heavy_check_mark:|      :battery: BAT     |                |                                                     idf                                                    |    >=6.1   |
+|        :x:       |    :video_game: IMU    |                |                                                                                                            |            |
+|        :x:       | :thermometer: HUMITURE |                |                                                                                                            |            |
 
 <!-- END_DEPENDENCIES -->
 </div>

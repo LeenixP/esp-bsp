@@ -29,9 +29,10 @@ dependencies:
     version: "^2.0.3"
     public: false
 
-  kodediy/esp_lcd_touch_cst820:
-    version: "^1.0.1"
+  espressif/esp_lcd_touch_cst820:
+    version: "^1.0.0"
     public: false
+    override_path: "../../components/lcd_touch/esp_lcd_touch_cst820"
 
   esp_video:
     version: "~2.2"
