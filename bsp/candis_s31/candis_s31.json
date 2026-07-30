@@ -62,12 +62,12 @@
             "BSP_LCD_SPI_NUM": "SPI2_HOST",
             "pins": {
                 "BSP_LCD_PCLK": "GPIO_NUM_12",
-                "BSP_LCD_DATA0": "GPIO_NUM_13",
-                "BSP_LCD_DATA1": "GPIO_NUM_14",
-                "BSP_LCD_DATA2": "GPIO_NUM_15",
-                "BSP_LCD_DATA3": "GPIO_NUM_16",
-                "BSP_LCD_CS": "GPIO_NUM_9",
-                "BSP_LCD_RST": "GPIO_NUM_10",
+                "BSP_LCD_DATA0": "GPIO_NUM_11",
+                "BSP_LCD_DATA1": "GPIO_NUM_13",
+                "BSP_LCD_DATA2": "GPIO_NUM_14",
+                "BSP_LCD_DATA3": "GPIO_NUM_9",
+                "BSP_LCD_CS": "GPIO_NUM_10",
+                "BSP_LCD_RST": "GPIO_NUM_15",
                 "BSP_LCD_BACKLIGHT": "GPIO_NUM_NC"
             },
             "BSP_FEATURE_LCD_TYPE": "",

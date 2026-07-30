@@ -782,7 +782,7 @@ Below are some of the most relevant predefined constants:
 
 | Type | Name |
 | ---: | :--- |
-| define  | [**BSP\_LCD\_CS**](#define-bsp_lcd_cs)  GPIO\_NUM\_9<br> |
+| define  | [**BSP\_LCD\_CS**](#define-bsp_lcd_cs)  GPIO\_NUM\_10<br> |
 | define  | [**BSP\_LCD\_DATA0**](#define-bsp_lcd_data0)  BSP\_LCD\_QSPI\_DATA0<br> |
 | define  | [**BSP\_LCD\_DATA1**](#define-bsp_lcd_data1)  BSP\_LCD\_QSPI\_DATA1<br> |
 | define  | [**BSP\_LCD\_DATA2**](#define-bsp_lcd_data2)  BSP\_LCD\_QSPI\_DATA2<br> |
@@ -790,13 +790,13 @@ Below are some of the most relevant predefined constants:
 | define  | [**BSP\_LCD\_PCLK**](#define-bsp_lcd_pclk)  BSP\_LCD\_QSPI\_CLK<br> |
 | define  | [**BSP\_LCD\_PIXEL\_CLOCK\_HZ**](#define-bsp_lcd_pixel_clock_hz)  (CONFIG\_BSP\_LCD\_PIXEL\_CLOCK\_MHZ \* 1000 \* 1000)<br> |
 | define  | [**BSP\_LCD\_QSPI\_CLK**](#define-bsp_lcd_qspi_clk)  GPIO\_NUM\_12<br> |
-| define  | [**BSP\_LCD\_QSPI\_DATA0**](#define-bsp_lcd_qspi_data0)  GPIO\_NUM\_13<br> |
-| define  | [**BSP\_LCD\_QSPI\_DATA1**](#define-bsp_lcd_qspi_data1)  GPIO\_NUM\_14<br> |
-| define  | [**BSP\_LCD\_QSPI\_DATA2**](#define-bsp_lcd_qspi_data2)  GPIO\_NUM\_15<br> |
-| define  | [**BSP\_LCD\_QSPI\_DATA3**](#define-bsp_lcd_qspi_data3)  GPIO\_NUM\_16<br> |
-| define  | [**BSP\_LCD\_RST**](#define-bsp_lcd_rst)  GPIO\_NUM\_10<br> |
+| define  | [**BSP\_LCD\_QSPI\_DATA0**](#define-bsp_lcd_qspi_data0)  GPIO\_NUM\_11<br> |
+| define  | [**BSP\_LCD\_QSPI\_DATA1**](#define-bsp_lcd_qspi_data1)  GPIO\_NUM\_13<br> |
+| define  | [**BSP\_LCD\_QSPI\_DATA2**](#define-bsp_lcd_qspi_data2)  GPIO\_NUM\_14<br> |
+| define  | [**BSP\_LCD\_QSPI\_DATA3**](#define-bsp_lcd_qspi_data3)  GPIO\_NUM\_9<br> |
+| define  | [**BSP\_LCD\_RST**](#define-bsp_lcd_rst)  GPIO\_NUM\_15<br> |
 | define  | [**BSP\_LCD\_SPI\_NUM**](#define-bsp_lcd_spi_num)  SPI2\_HOST<br> |
-| define  | [**BSP\_LCD\_TE**](#define-bsp_lcd_te)  GPIO\_NUM\_11<br> |
+| define  | [**BSP\_LCD\_TE**](#define-bsp_lcd_te)  GPIO\_NUM\_16<br> |
 | define  | [**BSP\_LCD\_TOUCH\_INT**](#define-bsp_lcd_touch_int)  BSP\_TOUCH\_INT<br> |
 | define  | [**BSP\_LCD\_TOUCH\_RST**](#define-bsp_lcd_touch_rst)  BSP\_TOUCH\_RST<br> |
 | define  | [**BSP\_LCD\_VBAT\_EN**](#define-bsp_lcd_vbat_en)  GPIO\_NUM\_5<br> |
@@ -1857,6 +1857,5 @@ esp_err_t bsp_shared_irq_service (
 
 
 Service TG28\_SW and RX8130CE until their shared interrupt line is released.
-
 
 
