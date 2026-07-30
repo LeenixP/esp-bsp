@@ -11,6 +11,16 @@ tags:
 dependencies:
   idf: ">=6.1"
 
+  espressif/fusb303b:
+    version: "^0.1.0"
+    public: false
+    override_path: "../../components/fusb303b"
+
+  espressif/rx8130ce:
+    version: "^0.1.0"
+    public: false
+    override_path: "../../components/rx8130ce"
+
   espressif/tg28_sw:
     version: "^0.1.0"
     public: false

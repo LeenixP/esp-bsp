@@ -163,6 +163,8 @@
         {"name": "BSP_CAPS_HUMITURE", "enabled": "0"}
     ],
     "BSP_DEPENDENCIES": [
+        {"name": "espressif/fusb303b", "version": "^0.1.0", "public": "false", "min_idf": "5.3"},
+        {"name": "espressif/rx8130ce", "version": "^0.1.0", "public": "false", "min_idf": "5.3"},
         {"name": "espressif/tg28_sw", "version": "^0.1.0", "public": "false", "min_idf": "5.3"},
         {"name": "esp_codec_dev", "version": "~1.5", "public": "true", "min_idf": "5.0"},
         {"name": "espressif/esp_lvgl_port", "version": "^2", "public": "true", "min_idf": "5.1"},
@@ -184,7 +186,7 @@
         "fatfs",
         "vfs"
     ],
-    "BSP_PRIV_REQUIRES": ["esp_psram", "lwip", "tg28_sw"],
+    "BSP_PRIV_REQUIRES": ["esp_psram", "fusb303b", "lwip", "rx8130ce", "tg28_sw"],
     "MIN_IDF_VER": "6.1",
     "BSP_FEATURE_EN": [
         {"name": "BSP_FEATURE_SD", "type": "GPIO", "pin": "BSP_SD_EN", "level": "false"},

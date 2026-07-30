@@ -17,7 +17,9 @@ idf_component_register(
         vfs
     PRIV_REQUIRES
         esp_psram
+        fusb303b
         lwip
+        rx8130ce
         tg28_sw
 )
 

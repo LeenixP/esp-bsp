@@ -5,8 +5,8 @@
 
 
 
-| :1234: [CAPABILITIES](#1234-capabilities) | :floppy_disk: [SD CARD](#floppy_disk-sd-card) | :musical_note: [AUDIO](#musical_note-audio) | :pager: [DISPLAY AND TOUCH](#pager-display-and-touch) | :bulb: [LEDS](#bulb-leds) | :electric_plug: [USB AND TYPE-C](#electric_plug-usb-and-type-c) | :battery: [BATTERY AND POWER](#battery-battery-and-power) | :camera: [CAMERA](#camera-camera) |
-| :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: |
+| :1234: [CAPABILITIES](#1234-capabilities) | :floppy_disk: [SD CARD](#floppy_disk-sd-card) | :musical_note: [AUDIO](#musical_note-audio) | :pager: [DISPLAY AND TOUCH](#pager-display-and-touch) | :bulb: [LEDS](#bulb-leds) | :electric_plug: [USB AND TYPE-C](#electric_plug-usb-and-type-c) | :battery: [BATTERY AND POWER](#battery-battery-and-power) | :camera: [CAMERA](#camera-camera) | 
+| :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | :-------------------------: | 
 
 </div>
 
@@ -204,7 +204,7 @@ You can use these macros to conditionally compile code depending on feature avai
 ```c
 esp_err_t bsp_i2c_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_i2c_get_handle`
@@ -212,7 +212,7 @@ esp_err_t bsp_i2c_deinit (
 ```c
 i2c_master_bus_handle_t bsp_i2c_get_handle (
     void
-)
+) 
 ```
 
 ### function `bsp_i2c_init`
@@ -220,7 +220,7 @@ i2c_master_bus_handle_t bsp_i2c_get_handle (
 ```c
 esp_err_t bsp_i2c_init (
     void
-)
+) 
 ```
 
 
@@ -230,7 +230,7 @@ Initialize the main I2C bus. Multiple calls are allowed.
 ```c
 esp_err_t bsp_lp_i2c_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_lp_i2c_get_handle`
@@ -238,7 +238,7 @@ esp_err_t bsp_lp_i2c_deinit (
 ```c
 i2c_master_bus_handle_t bsp_lp_i2c_get_handle (
     void
-)
+) 
 ```
 
 ### function `bsp_lp_i2c_init`
@@ -246,7 +246,7 @@ i2c_master_bus_handle_t bsp_lp_i2c_get_handle (
 ```c
 esp_err_t bsp_lp_i2c_init (
     void
-)
+) 
 ```
 
 
@@ -370,15 +370,15 @@ sdmmc_card_print_info(stdout, sdcard);
 
 Variables:
 
--  sdmmc\_host\_t \* host
+-  sdmmc\_host\_t \* host  
 
--  const esp\_vfs\_fat\_sdmmc\_mount\_config\_t \* mount
+-  const esp\_vfs\_fat\_sdmmc\_mount\_config\_t \* mount  
 
--  const sdmmc\_slot\_config\_t \* sdmmc
+-  const sdmmc\_slot\_config\_t \* sdmmc  
 
--  const sdspi\_device\_config\_t \* sdspi
+-  const sdspi\_device\_config\_t \* sdspi  
 
--  union [**bsp\_sdcard\_cfg\_t**](#struct-bsp_sdcard_cfg_t) slot
+-  union [**bsp\_sdcard\_cfg\_t**](#struct-bsp_sdcard_cfg_t) slot  
 
 
 ## Functions Documentation
@@ -388,7 +388,7 @@ Variables:
 ```c
 sdmmc_card_t * bsp_sdcard_get_handle (
     void
-)
+) 
 ```
 
 ### function `bsp_sdcard_get_sdmmc_host`
@@ -397,7 +397,7 @@ sdmmc_card_t * bsp_sdcard_get_handle (
 void bsp_sdcard_get_sdmmc_host (
     int slot,
     sdmmc_host_t *config
-)
+) 
 ```
 
 ### function `bsp_sdcard_is_inserted`
@@ -405,7 +405,7 @@ void bsp_sdcard_get_sdmmc_host (
 ```c
 bool bsp_sdcard_is_inserted (
     void
-)
+) 
 ```
 
 
@@ -415,7 +415,7 @@ SDMMC storage.
 ```c
 esp_err_t bsp_sdcard_mount (
     void
-)
+) 
 ```
 
 ### function `bsp_sdcard_sdmmc_get_slot`
@@ -424,7 +424,7 @@ esp_err_t bsp_sdcard_mount (
 void bsp_sdcard_sdmmc_get_slot (
     int slot,
     sdmmc_slot_config_t *config
-)
+) 
 ```
 
 ### function `bsp_sdcard_sdmmc_mount`
@@ -432,7 +432,7 @@ void bsp_sdcard_sdmmc_get_slot (
 ```c
 esp_err_t bsp_sdcard_sdmmc_mount (
     bsp_sdcard_cfg_t *cfg
-)
+) 
 ```
 
 ### function `bsp_sdcard_sdspi_get_slot`
@@ -441,7 +441,7 @@ esp_err_t bsp_sdcard_sdmmc_mount (
 void bsp_sdcard_sdspi_get_slot (
     spi_host_device_t spi_host,
     sdspi_device_config_t *config
-)
+) 
 ```
 
 ### function `bsp_sdcard_sdspi_mount`
@@ -449,7 +449,7 @@ void bsp_sdcard_sdspi_get_slot (
 ```c
 esp_err_t bsp_sdcard_sdspi_mount (
     bsp_sdcard_cfg_t *cfg
-)
+) 
 ```
 
 ### function `bsp_sdcard_unmount`
@@ -457,7 +457,7 @@ esp_err_t bsp_sdcard_sdspi_mount (
 ```c
 esp_err_t bsp_sdcard_unmount (
     void
-)
+) 
 ```
 
 
@@ -585,7 +585,7 @@ esp_codec_dev_close(mic_codec_dev);
 ```c
 esp_err_t bsp_audio_codec_deinit (
     esp_codec_dev_handle_t device
-)
+) 
 ```
 
 ### function `bsp_audio_codec_microphone_init`
@@ -593,7 +593,7 @@ esp_err_t bsp_audio_codec_deinit (
 ```c
 esp_codec_dev_handle_t bsp_audio_codec_microphone_init (
     void
-)
+) 
 ```
 
 ### function `bsp_audio_codec_speaker_init`
@@ -601,7 +601,7 @@ esp_codec_dev_handle_t bsp_audio_codec_microphone_init (
 ```c
 esp_codec_dev_handle_t bsp_audio_codec_speaker_init (
     void
-)
+) 
 ```
 
 ### function `bsp_audio_deinit`
@@ -609,7 +609,7 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init (
 ```c
 esp_err_t bsp_audio_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_audio_get_codec_itf`
@@ -617,7 +617,7 @@ esp_err_t bsp_audio_deinit (
 ```c
 const audio_codec_data_if_t * bsp_audio_get_codec_itf (
     void
-)
+) 
 ```
 
 ### function `bsp_audio_init`
@@ -625,7 +625,7 @@ const audio_codec_data_if_t * bsp_audio_get_codec_itf (
 ```c
 esp_err_t bsp_audio_init (
     const i2s_std_config_t *i2s_config
-)
+) 
 ```
 
 
@@ -816,48 +816,48 @@ Below are some of the most relevant predefined constants:
 
 Variables:
 
--  unsigned int buff_dma
+-  unsigned int buff_dma  
 
--  unsigned int buff_spiram
+-  unsigned int buff_spiram  
 
--  uint32\_t buffer_size
+-  uint32\_t buffer_size  
 
--  bool double_buffer
+-  bool double_buffer  
 
--  struct [**bsp\_display\_cfg\_t**](#struct-bsp_display_cfg_t) flags
+-  struct [**bsp\_display\_cfg\_t**](#struct-bsp_display_cfg_t) flags  
 
--  lvgl\_port\_cfg\_t lvgl_port_cfg
+-  lvgl\_port\_cfg\_t lvgl_port_cfg  
 
--  unsigned int sw_rotate
+-  unsigned int sw_rotate  
 
 ### struct `bsp_display_config_t`
 
 
 Variables:
 
--  int max_transfer_sz
+-  int max_transfer_sz  
 
 ### struct `bsp_lcd_handles_t`
 
 
 Variables:
 
--  esp\_lcd\_panel\_handle\_t control
+-  esp\_lcd\_panel\_handle\_t control  
 
--  esp\_lcd\_panel\_io\_handle\_t io
+-  esp\_lcd\_panel\_io\_handle\_t io  
 
--  esp\_lcd\_panel\_handle\_t panel
+-  esp\_lcd\_panel\_handle\_t panel  
 
 ### struct `bsp_touch_config_t`
 
 
 Variables:
 
--  bool mirror_x
+-  bool mirror_x  
 
--  bool mirror_y
+-  bool mirror_y  
 
--  bool swap_xy
+-  bool swap_xy  
 
 
 ## Functions Documentation
@@ -867,7 +867,7 @@ Variables:
 ```c
 esp_err_t bsp_display_backlight_off (
     void
-)
+) 
 ```
 
 ### function `bsp_display_backlight_on`
@@ -875,7 +875,7 @@ esp_err_t bsp_display_backlight_off (
 ```c
 esp_err_t bsp_display_backlight_on (
     void
-)
+) 
 ```
 
 ### function `bsp_display_brightness_deinit`
@@ -883,7 +883,7 @@ esp_err_t bsp_display_backlight_on (
 ```c
 esp_err_t bsp_display_brightness_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_display_brightness_init`
@@ -891,7 +891,7 @@ esp_err_t bsp_display_brightness_deinit (
 ```c
 esp_err_t bsp_display_brightness_init (
     void
-)
+) 
 ```
 
 ### function `bsp_display_brightness_set`
@@ -899,7 +899,7 @@ esp_err_t bsp_display_brightness_init (
 ```c
 esp_err_t bsp_display_brightness_set (
     int brightness_percent
-)
+) 
 ```
 
 ### function `bsp_display_delete`
@@ -907,7 +907,7 @@ esp_err_t bsp_display_brightness_set (
 ```c
 void bsp_display_delete (
     void
-)
+) 
 ```
 
 ### function `bsp_display_enter_sleep`
@@ -915,7 +915,7 @@ void bsp_display_delete (
 ```c
 esp_err_t bsp_display_enter_sleep (
     void
-)
+) 
 ```
 
 ### function `bsp_display_exit_sleep`
@@ -923,7 +923,7 @@ esp_err_t bsp_display_enter_sleep (
 ```c
 esp_err_t bsp_display_exit_sleep (
     void
-)
+) 
 ```
 
 ### function `bsp_display_get_input_dev`
@@ -931,7 +931,7 @@ esp_err_t bsp_display_exit_sleep (
 ```c
 lv_indev_t * bsp_display_get_input_dev (
     void
-)
+) 
 ```
 
 ### function `bsp_display_lock`
@@ -939,7 +939,7 @@ lv_indev_t * bsp_display_get_input_dev (
 ```c
 bool bsp_display_lock (
     uint32_t timeout_ms
-)
+) 
 ```
 
 ### function `bsp_display_new`
@@ -949,7 +949,7 @@ esp_err_t bsp_display_new (
     const bsp_display_config_t *config,
     esp_lcd_panel_handle_t *ret_panel,
     esp_lcd_panel_io_handle_t *ret_io
-)
+) 
 ```
 
 ### function `bsp_display_new_with_handles`
@@ -958,7 +958,7 @@ esp_err_t bsp_display_new (
 esp_err_t bsp_display_new_with_handles (
     const bsp_display_config_t *config,
     bsp_lcd_handles_t *ret_handles
-)
+) 
 ```
 
 ### function `bsp_display_rotate`
@@ -967,7 +967,7 @@ esp_err_t bsp_display_new_with_handles (
 void bsp_display_rotate (
     lv_display_t *display,
     lv_display_rotation_t rotation
-)
+) 
 ```
 
 ### function `bsp_display_start`
@@ -975,7 +975,7 @@ void bsp_display_rotate (
 ```c
 lv_display_t * bsp_display_start (
     void
-)
+) 
 ```
 
 ### function `bsp_display_start_with_config`
@@ -983,7 +983,7 @@ lv_display_t * bsp_display_start (
 ```c
 lv_display_t * bsp_display_start_with_config (
     const bsp_display_cfg_t *cfg
-)
+) 
 ```
 
 ### function `bsp_display_stop`
@@ -991,7 +991,7 @@ lv_display_t * bsp_display_start_with_config (
 ```c
 esp_err_t bsp_display_stop (
     void
-)
+) 
 ```
 
 ### function `bsp_display_unlock`
@@ -999,7 +999,7 @@ esp_err_t bsp_display_stop (
 ```c
 void bsp_display_unlock (
     void
-)
+) 
 ```
 
 ### function `bsp_touch_delete`
@@ -1007,7 +1007,7 @@ void bsp_display_unlock (
 ```c
 esp_err_t bsp_touch_delete (
     void
-)
+) 
 ```
 
 ### function `bsp_touch_get_handle`
@@ -1015,7 +1015,7 @@ esp_err_t bsp_touch_delete (
 ```c
 esp_lcd_touch_handle_t bsp_touch_get_handle (
     void
-)
+) 
 ```
 
 ### function `bsp_touch_new`
@@ -1024,7 +1024,7 @@ esp_lcd_touch_handle_t bsp_touch_get_handle (
 esp_err_t bsp_touch_new (
     const bsp_touch_config_t *config,
     esp_lcd_touch_handle_t *ret_touch
-)
+) 
 ```
 
 
@@ -1119,7 +1119,7 @@ esp_err_t bsp_led_indicator_create (
     led_indicator_handle_t led_array,
     int *led_cnt,
     int led_array_size
-)
+) 
 ```
 
 
@@ -1130,7 +1130,7 @@ Addressable RGB LED.
 esp_err_t bsp_led_set (
     led_indicator_handle_t handle,
     bool on
-)
+) 
 ```
 
 
@@ -1212,29 +1212,29 @@ FUSB303B connection snapshot.
 
 Variables:
 
--  bsp\_type\_c\_current\_t advertised_current
+-  bsp\_type\_c\_current\_t advertised_current  
 
--  bool attached
+-  bool attached  
 
--  uint8\_t device_id
+-  uint8\_t device_id  
 
--  uint8\_t device_type
+-  uint8\_t device_type  
 
--  uint8\_t i2c_address
+-  uint8\_t i2c_address  
 
--  uint8\_t interrupt
+-  uint8\_t interrupt  
 
--  uint8\_t interrupt1
+-  uint8\_t interrupt1  
 
--  uint8\_t orientation
+-  uint8\_t orientation  
 
--  uint8\_t status
+-  uint8\_t status  
 
--  uint8\_t status1
+-  uint8\_t status1  
 
--  uint8\_t type
+-  uint8\_t type  
 
--  bool vbus_ok
+-  bool vbus_ok  
 
 ### enum `bsp_usb_host_power_mode_t`
 
@@ -1254,7 +1254,7 @@ Power source selection kept compatible with the common ESP-BSP USB API.
 ```c
 esp_err_t bsp_type_c_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_type_c_get_status`
@@ -1263,7 +1263,7 @@ esp_err_t bsp_type_c_deinit (
 esp_err_t bsp_type_c_get_status (
     bsp_type_c_status_t *status,
     bool clear_interrupts
-)
+) 
 ```
 
 ### function `bsp_type_c_init`
@@ -1271,7 +1271,7 @@ esp_err_t bsp_type_c_get_status (
 ```c
 esp_err_t bsp_type_c_init (
     void
-)
+) 
 ```
 
 
@@ -1282,7 +1282,7 @@ FUSB303B access. Source role selection does not enable the 5 V boost rail.
 esp_err_t bsp_type_c_set_role (
     bsp_type_c_role_t role,
     bsp_type_c_current_t current
-)
+) 
 ```
 
 ### function `bsp_usb_host_start`
@@ -1291,7 +1291,7 @@ esp_err_t bsp_type_c_set_role (
 esp_err_t bsp_usb_host_start (
     bsp_usb_host_power_mode_t mode,
     bool limit_500mA
-)
+) 
 ```
 
 
@@ -1301,7 +1301,7 @@ Install or remove the native USB Host library for the Type-C2 connector.
 ```c
 esp_err_t bsp_usb_host_stop (
     void
-)
+) 
 ```
 
 ### function `bsp_usb_otg_power_set`
@@ -1310,7 +1310,7 @@ esp_err_t bsp_usb_host_stop (
 esp_err_t bsp_usb_otg_power_set (
     bool enable,
     bsp_type_c_current_t current
-)
+) 
 ```
 
 
@@ -1422,23 +1422,23 @@ Read-only TG28\_SW power and battery snapshot.
 
 Variables:
 
--  uint16\_t battery_mv
+-  uint16\_t battery_mv  
 
--  uint8\_t battery_percent
+-  uint8\_t battery_percent  
 
--  bool battery_present
+-  bool battery_present  
 
--  bool charge_done
+-  bool charge_done  
 
--  bool charging
+-  bool charging  
 
--  uint8\_t chip_id
+-  uint8\_t chip_id  
 
--  uint8\_t common_status0
+-  uint8\_t common_status0  
 
--  uint8\_t common_status1
+-  uint8\_t common_status1  
 
--  bool vbus_present
+-  bool vbus_present  
 
 ### enum `bsp_power_domain_t`
 
@@ -1464,7 +1464,7 @@ Directly controlled board power domains.
 ```c
 const char * bsp_peripheral_name (
     bsp_peripheral_t peripheral
-)
+) 
 ```
 
 ### function `bsp_peripheral_power_set`
@@ -1473,7 +1473,7 @@ const char * bsp_peripheral_name (
 esp_err_t bsp_peripheral_power_set (
     bsp_peripheral_t peripheral,
     bool enable
-)
+) 
 ```
 
 
@@ -1483,7 +1483,7 @@ Apply the board-defined sequence for one complete peripheral supply.
 ```c
 esp_err_t bsp_pmic_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_pmic_get_and_clear_interrupts`
@@ -1491,7 +1491,7 @@ esp_err_t bsp_pmic_deinit (
 ```c
 esp_err_t bsp_pmic_get_and_clear_interrupts (
     uint8_t status
-)
+) 
 ```
 
 ### function `bsp_pmic_get_status`
@@ -1499,7 +1499,7 @@ esp_err_t bsp_pmic_get_and_clear_interrupts (
 ```c
 esp_err_t bsp_pmic_get_status (
     bsp_pmic_status_t *status
-)
+) 
 ```
 
 ### function `bsp_pmic_init`
@@ -1507,7 +1507,7 @@ esp_err_t bsp_pmic_get_status (
 ```c
 esp_err_t bsp_pmic_init (
     void
-)
+) 
 ```
 
 
@@ -1518,7 +1518,7 @@ TG28\_SW access. Regulator writes are explicit and never performed by init.
 esp_err_t bsp_pmic_regulator_enable (
     bsp_pmic_regulator_t regulator,
     bool enable
-)
+) 
 ```
 
 ### function `bsp_pmic_regulator_get_voltage`
@@ -1527,7 +1527,7 @@ esp_err_t bsp_pmic_regulator_enable (
 esp_err_t bsp_pmic_regulator_get_voltage (
     bsp_pmic_regulator_t regulator,
     uint16_t *millivolts
-)
+) 
 ```
 
 ### function `bsp_pmic_regulator_is_enabled`
@@ -1536,7 +1536,7 @@ esp_err_t bsp_pmic_regulator_get_voltage (
 esp_err_t bsp_pmic_regulator_is_enabled (
     bsp_pmic_regulator_t regulator,
     bool *enabled
-)
+) 
 ```
 
 ### function `bsp_pmic_regulator_name`
@@ -1544,7 +1544,7 @@ esp_err_t bsp_pmic_regulator_is_enabled (
 ```c
 const char * bsp_pmic_regulator_name (
     bsp_pmic_regulator_t regulator
-)
+) 
 ```
 
 ### function `bsp_pmic_regulator_set_voltage`
@@ -1553,7 +1553,7 @@ const char * bsp_pmic_regulator_name (
 esp_err_t bsp_pmic_regulator_set_voltage (
     bsp_pmic_regulator_t regulator,
     uint16_t millivolts
-)
+) 
 ```
 
 ### function `bsp_power_domain_get`
@@ -1562,7 +1562,7 @@ esp_err_t bsp_pmic_regulator_set_voltage (
 esp_err_t bsp_power_domain_get (
     bsp_power_domain_t domain,
     bool *enabled
-)
+) 
 ```
 
 ### function `bsp_power_domain_name`
@@ -1570,7 +1570,7 @@ esp_err_t bsp_power_domain_get (
 ```c
 const char * bsp_power_domain_name (
     bsp_power_domain_t domain
-)
+) 
 ```
 
 ### function `bsp_power_domain_set`
@@ -1579,7 +1579,7 @@ const char * bsp_power_domain_name (
 esp_err_t bsp_power_domain_set (
     bsp_power_domain_t domain,
     bool enable
-)
+) 
 ```
 
 ### function `bsp_power_safe_state`
@@ -1587,7 +1587,7 @@ esp_err_t bsp_power_domain_set (
 ```c
 esp_err_t bsp_power_safe_state (
     void
-)
+) 
 ```
 
 
@@ -1658,7 +1658,7 @@ Camera usage can be quite complex. For a complete example, refer to the [`displa
 
 Variables:
 
--  uint8\_t dummy
+-  uint8\_t dummy  
 
 
 ## Functions Documentation
@@ -1668,7 +1668,7 @@ Variables:
 ```c
 esp_err_t bsp_camera_start (
     const bsp_camera_cfg_t *cfg
-)
+) 
 ```
 
 
@@ -1678,7 +1678,7 @@ DVP camera pipeline. Sensor support is selected in project configuration.
 ```c
 esp_err_t bsp_camera_stop (
     void
-)
+) 
 ```
 
 
@@ -1733,19 +1733,19 @@ RX8130CE retained status flags.
 
 Variables:
 
--  bool alarm
+-  bool alarm  
 
--  bool backup_voltage_low
+-  bool backup_voltage_low  
 
--  uint8\_t raw
+-  uint8\_t raw  
 
--  bool reset
+-  bool reset  
 
--  bool time_valid
+-  bool time_valid  
 
--  bool timer
+-  bool timer  
 
--  bool update
+-  bool update  
 
 ### struct `bsp_rtc_time_t`
 
@@ -1754,19 +1754,19 @@ Calendar time stored in the RX8130CE.
 
 Variables:
 
--  uint8\_t day
+-  uint8\_t day  
 
--  uint8\_t hour
+-  uint8\_t hour  
 
--  uint8\_t minute
+-  uint8\_t minute  
 
--  uint8\_t month
+-  uint8\_t month  
 
--  uint8\_t second
+-  uint8\_t second  
 
--  uint8\_t weekday
+-  uint8\_t weekday  
 
--  uint16\_t year
+-  uint16\_t year  
 
 ### struct `bsp_shared_irq_status_t`
 
@@ -1775,13 +1775,13 @@ Combined interrupt snapshot for the shared active-low line on GPIO2.
 
 Variables:
 
--  bool line_released
+-  bool line_released  
 
--  uint8\_t pmic
+-  uint8\_t pmic  
 
--  uint8\_t rtc
+-  uint8\_t rtc  
 
--  unsigned service_passes
+-  unsigned service_passes  
 
 
 ## Functions Documentation
@@ -1791,7 +1791,7 @@ Variables:
 ```c
 esp_err_t bsp_board_init (
     void
-)
+) 
 ```
 
 
@@ -1801,7 +1801,7 @@ Initialize the board in its disabled, low-risk state.
 ```c
 esp_err_t bsp_rtc_clear_interrupt_flags (
     uint8_t *flags
-)
+) 
 ```
 
 ### function `bsp_rtc_deinit`
@@ -1809,7 +1809,7 @@ esp_err_t bsp_rtc_clear_interrupt_flags (
 ```c
 esp_err_t bsp_rtc_deinit (
     void
-)
+) 
 ```
 
 ### function `bsp_rtc_get_status`
@@ -1817,7 +1817,7 @@ esp_err_t bsp_rtc_deinit (
 ```c
 esp_err_t bsp_rtc_get_status (
     bsp_rtc_status_t *status
-)
+) 
 ```
 
 ### function `bsp_rtc_get_time`
@@ -1826,7 +1826,7 @@ esp_err_t bsp_rtc_get_status (
 esp_err_t bsp_rtc_get_time (
     bsp_rtc_time_t *time,
     bsp_rtc_status_t *status
-)
+) 
 ```
 
 ### function `bsp_rtc_init`
@@ -1834,7 +1834,7 @@ esp_err_t bsp_rtc_get_time (
 ```c
 esp_err_t bsp_rtc_init (
     void
-)
+) 
 ```
 
 
@@ -1844,7 +1844,7 @@ RX8130CE access.
 ```c
 esp_err_t bsp_rtc_set_time (
     const bsp_rtc_time_t *time
-)
+) 
 ```
 
 ### function `bsp_shared_irq_service`
@@ -1852,8 +1852,11 @@ esp_err_t bsp_rtc_set_time (
 ```c
 esp_err_t bsp_shared_irq_service (
     bsp_shared_irq_status_t *status
-)
+) 
 ```
 
 
 Service TG28\_SW and RX8130CE until their shared interrupt line is released.
+
+
+
