@@ -14,12 +14,12 @@ idf_component_register(
         esp_lcd
         esp_lcd_touch
         fatfs
+        rx8130ce
         vfs
     PRIV_REQUIRES
         esp_psram
         fusb303b
         lwip
-        rx8130ce
         tg28_sw
 )
 

@@ -12,7 +12,13 @@
 #define ESP_LCD_COLOR_FORMAT_RGB565            1
 #define ESP_LCD_COLOR_FORMAT_RGB888            2
 #define BSP_LCD_COLOR_FORMAT                    ESP_LCD_COLOR_FORMAT_RGB565
-#define BSP_LCD_BIGENDIAN                       0
+/* CO5300 expects RGB565 MSB-first on the wire. LVGL 9.5 dropped
+ * LV_COLOR_16_SWAP, so byte swapping is done by esp_lvgl_port
+ * (swap_bytes) when this is 1; without it red/blue are swapped on panel.
+ * This flag only affects the LVGL path: the NoGLIB direct-draw path sends
+ * the framebuffer bytes as-is, so NoGLIB users must store big-endian
+ * RGB565 in their buffers themselves. */
+#define BSP_LCD_BIGENDIAN                       1
 #define BSP_LCD_INVERT_COLORS                   0
 #define BSP_LCD_BITS_PER_PIXEL                  16
 #define BSP_LCD_COLOR_SPACE                     LCD_RGB_ELEMENT_ORDER_RGB

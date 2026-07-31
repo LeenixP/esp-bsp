@@ -37,6 +37,7 @@ static void copy_status_from_driver(const rx8130ce_status_t *source,
         .update = source->update,
         .reset = source->reset,
         .backup_voltage_low = source->backup_voltage_low,
+        .backup_battery_full = source->backup_battery_full,
     };
 }
 
@@ -104,6 +105,27 @@ esp_err_t bsp_rtc_set_time(const bsp_rtc_time_t *time)
         .second = time->second,
     };
     return rx8130ce_set_time(s_rtc, &driver_time);
+}
+
+esp_err_t bsp_rtc_set_alarm(const bsp_rtc_alarm_t *alarm)
+{
+    ESP_RETURN_ON_FALSE(alarm != NULL, ESP_ERR_INVALID_ARG, TAG, "alarm is NULL");
+    ESP_RETURN_ON_ERROR(bsp_rtc_init(), TAG, "RX8130CE is unavailable");
+    return rx8130ce_set_alarm(s_rtc, alarm);
+}
+
+esp_err_t bsp_rtc_get_alarm(bsp_rtc_alarm_t *out_alarm)
+{
+    ESP_RETURN_ON_FALSE(out_alarm != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "alarm is NULL");
+    ESP_RETURN_ON_ERROR(bsp_rtc_init(), TAG, "RX8130CE is unavailable");
+    return rx8130ce_get_alarm(s_rtc, out_alarm);
+}
+
+esp_err_t bsp_rtc_alarm_irq_enable(bool enable)
+{
+    ESP_RETURN_ON_ERROR(bsp_rtc_init(), TAG, "RX8130CE is unavailable");
+    return rx8130ce_alarm_irq_enable(s_rtc, enable);
 }
 
 esp_err_t bsp_rtc_clear_interrupt_flags(uint8_t *flags)

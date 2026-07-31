@@ -23,6 +23,15 @@ typedef struct {
     const audio_codec_gpio_if_t *gpio;
 } codec_instance_t;
 
+/* Speaker and microphone are two separate es8389_codec_new() instances
+ * against the same physical chip, and each instance's open() performs a
+ * full soft reset of the whole codec (ES8389_RESET_REG0x00, see
+ * device/es8389/es8389.c in esp_codec_dev). Whichever side is opened last
+ * therefore wipes the other side's register state. This structure is kept
+ * as-is (same as the official esp32_s31_korvo_1 BSP); a single shared
+ * instance would need a larger redesign.
+ * EVT: re-verify the speaker -> mic -> speaker sequence with both sides
+ * opened before relying on concurrent playback + recording. */
 static codec_instance_t s_speaker;
 static codec_instance_t s_microphone;
 
@@ -56,6 +65,12 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
         goto fail;
     }
 
+    /* Interface mode note: the Korvo-1 documentation requires the ES8389 to
+     * run in TDM mode, but this BSP (like the official esp32_s31_korvo_1 BSP)
+     * uses I2S STD/Philips mode and the es8389 driver stays in its default
+     * I2S data format. Kept as-is until the ES8389 vendor (Sunking) datasheet
+     * arrives and the TDM requirement can be confirmed; revisit both the I2S
+     * peripheral mode and the codec format together then. */
     const i2s_std_config_t default_config = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(22050),
         .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(
@@ -135,7 +150,10 @@ esp_err_t bsp_audio_deinit(void)
         }
         s_rx_channel = NULL;
     }
-    bsp_power_domain_set(BSP_POWER_AUDIO_PA, false);
+    if (bsp_power_domain_set(BSP_POWER_AUDIO_PA, false) != ESP_OK &&
+            result == ESP_OK) {
+        result = ESP_FAIL;
+    }
     if (bsp_peripheral_power_set(BSP_PERIPHERAL_AUDIO, false) != ESP_OK &&
             result == ESP_OK) {
         result = ESP_FAIL;
@@ -203,10 +221,21 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         delete_codec_instance(&s_speaker);
         return NULL;
     }
+    /* TODO(hw): pa_voltage=5.0 / codec_dac_voltage=3.3 are copied from
+     * esp32_s31_korvo_1; the actual PA supply rail on this board still needs
+     * schematic confirmation. These values only feed the esp_codec_dev
+     * hardware-gain dB math, not the analog path itself. */
     const esp_codec_dev_hw_gain_t gain = {
         .pa_voltage = 5.0,
         .codec_dac_voltage = 3.3,
     };
+    /* The board routes MCLK (GPIO35) to the codec, so clock it from MCLK
+     * instead of deriving the clock from BCLK. Besides using the proper
+     * clock, use_mclk=true makes es8389_set_fs() skip es8389_config_sample(),
+     * whose coefficient table has no entry for e.g. 22050 Hz (that lookup
+     * failure is silently dropped, leaving the codec clocks in their open()
+     * state). open() programs MCLK/LRCK=256, matching the I2S STD default
+     * mclk_multiple=256. */
     es8389_codec_cfg_t codec_config = {
         .ctrl_if = s_speaker.control,
         .gpio_if = s_speaker.gpio,
@@ -214,6 +243,7 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         .pa_pin = BSP_AUDIO_PA_EN,
         .pa_reverted = BSP_AUDIO_PA_EN_ACTIVE_LEVEL == 0,
         .master_mode = false,
+        .use_mclk = true,
         .hw_gain = gain,
     };
     s_speaker.codec = es8389_codec_new(&codec_config);
@@ -248,6 +278,10 @@ esp_codec_dev_handle_t bsp_audio_codec_microphone_init(void)
     es8389_codec_cfg_t codec_config = {
         .ctrl_if = s_microphone.control,
         .codec_mode = ESP_CODEC_DEV_WORK_MODE_ADC,
+        /* Same physical chip as the speaker side: must also clock from MCLK,
+         * otherwise this instance's open() would switch the whole codec back
+         * to BCLK-derived clocks (see bsp_audio_codec_speaker_init). */
+        .use_mclk = true,
     };
     s_microphone.codec = es8389_codec_new(&codec_config);
     if (s_microphone.codec == NULL) {

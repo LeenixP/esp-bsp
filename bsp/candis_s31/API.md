@@ -483,6 +483,12 @@ esp_codec_dev_handle_t mic_codec_dev = bsp_audio_codec_microphone_init();
 After initialization, the [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) API can be used to control playback and recording.
 
 > [!NOTE]
+> On this board the ES8389 is clocked from MCLK (GPIO35, `use_mclk=true`); the codec's BCLK-derived clock path is not used. This also avoids the es8389 driver's BCLK-mode coefficient lookup, which has no entry for the default 22050 Hz sample rate.
+
+> [!WARNING]
+> Speaker and microphone are separate codec instances over the same physical ES8389. Opening one side soft-resets the whole codec, so the side opened earlier loses its register state. If both directions are used, open the speaker first and re-verify the speaker -> mic -> speaker sequence (see the note in `bsp_audio.c`).
+
+> [!NOTE]
 > Some BSPs may only support playback (speaker) or only input (microphone). Use the capability macros (`BSP_CAPS_AUDIO`, `BSP_CAPS_AUDIO_SPEAKER`, `BSP_CAPS_AUDIO_MIC`) to check supported features.
 
 ### Example of audio usage
@@ -733,6 +739,41 @@ bsp_display_unlock();
 > [!NOTE]
 > Some LCDs do not support hardware rotation and instead use software rotation, which consumes more memory.
 
+Touch input follows display rotation automatically: LVGL 9.5 rotates pointer
+coordinates in the core, so no touch remapping is needed after
+`bsp_display_rotate()`. On this panel the active GRAM window is row/column
+asymmetric (column offset 10, row offset 0), so 90/180 degree rotations can
+show a 10-20 px shift until the offsets are measured during EVT.
+
+### Display sleep and deep standby
+
+`bsp_display_enter_sleep()` turns the display off, puts the touch controller
+to sleep, and sends the CO5300 sleep-in command. `bsp_display_exit_sleep()`
+sends sleep-out, wakes the touch controller, and restores the backlight.
+
+`bsp_display_enter_deep_standby()` additionally issues the CO5300 deep
+standby command (`0x4F`), after which the panel ignores further commands.
+`bsp_display_exit_deep_standby()` cycles the panel reset line, replays the
+full initialization sequence, and turns the display back on.
+
+Touch sleep uses the CST820 deep-sleep register (`0xA5 = 0x03`). The
+controller does not answer I2C while asleep, so wake-up cycles the touch
+reset line and re-reads the controller ID to confirm it is back on the bus.
+
+> [!NOTE]
+> Touch is optional at runtime: if touch initialization fails (for example a
+> loose touch FPC during EVT), `bsp_display_start()` and
+> `bsp_display_start_with_config()` still return a working display and
+> `bsp_display_get_input_dev()` returns `NULL`.
+
+### Tearing effect (TE) limitation
+
+The panel TE output is wired to `BSP_LCD_TE` (GPIO16) and tearing signal
+output is enabled by the initialization sequence, but nothing consumes it
+yet: the QSPI path does not support anti-tearing. Avoid fast full-screen
+scroll animations in the UI. A future option is the esp_lvgl_adapter TE_SYNC
+scheme.
+
 ### Available constants
 
 Constants like screen resolution, pin configuration, and other options are defined in the BSP header files (`{bsp_name}.h`, `display.h`, `touch.h`).
@@ -763,7 +804,9 @@ Below are some of the most relevant predefined constants:
 |  esp\_err\_t | [**bsp\_display\_brightness\_init**](#function-bsp_display_brightness_init) (void) <br> |
 |  esp\_err\_t | [**bsp\_display\_brightness\_set**](#function-bsp_display_brightness_set) (int brightness\_percent) <br> |
 |  void | [**bsp\_display\_delete**](#function-bsp_display_delete) (void) <br> |
+|  esp\_err\_t | [**bsp\_display\_enter\_deep\_standby**](#function-bsp_display_enter_deep_standby) (void) <br> |
 |  esp\_err\_t | [**bsp\_display\_enter\_sleep**](#function-bsp_display_enter_sleep) (void) <br> |
+|  esp\_err\_t | [**bsp\_display\_exit\_deep\_standby**](#function-bsp_display_exit_deep_standby) (void) <br> |
 |  esp\_err\_t | [**bsp\_display\_exit\_sleep**](#function-bsp_display_exit_sleep) (void) <br> |
 |  lv\_indev\_t \* | [**bsp\_display\_get\_input\_dev**](#function-bsp_display_get_input_dev) (void) <br> |
 |  bool | [**bsp\_display\_lock**](#function-bsp_display_lock) (uint32\_t timeout\_ms) <br> |
@@ -1321,15 +1364,15 @@ esp_err_t bsp_usb_otg_power_set (
 
 ## :battery: Battery
 
-Some boards with battery support can measure the battery voltage using an ADC channel. BSP provides a simple API for this:
+This board measures the battery through the TG28\_SW PMIC instead of an ADC channel. Read a complete power and battery snapshot with:
 
+```c
+bsp_pmic_status_t status;
+bsp_pmic_get_status(&status);
+/* status.battery_mv, status.battery_percent, status.charging, ... */
 ```
-/* Initialize the battery voltage measurement */
-bsp_voltage_init();
 
-/* Read battery voltage in millivolts */
-int voltage = bsp_voltage_battery_get();
-```
+The charge current, charge voltage, and input current limit are configured through the `bsp_pmic_set_*` functions below. Only exactly representable values are accepted.
 
 ### Battery and Power API Reference
 
@@ -1350,13 +1393,20 @@ int voltage = bsp_voltage_battery_get();
 |  esp\_err\_t | [**bsp\_peripheral\_power\_set**](#function-bsp_peripheral_power_set) ([**bsp\_peripheral\_t**](#enum-bsp_peripheral_t) peripheral, bool enable) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_deinit**](#function-bsp_pmic_deinit) (void) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_get\_and\_clear\_interrupts**](#function-bsp_pmic_get_and_clear_interrupts) (uint8\_t status) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_get\_charge\_current**](#function-bsp_pmic_get_charge_current) (uint16\_t \*milliamps) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_get\_charge\_voltage**](#function-bsp_pmic_get_charge_voltage) (uint16\_t \*millivolts) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_get\_input\_current\_limit**](#function-bsp_pmic_get_input_current_limit) (uint16\_t \*milliamps) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_get\_status**](#function-bsp_pmic_get_status) ([**bsp\_pmic\_status\_t**](#struct-bsp_pmic_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_init**](#function-bsp_pmic_init) (void) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_program\_battery\_model**](#function-bsp_pmic_program_battery_model) (const uint8\_t \*model, size\_t size) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_enable**](#function-bsp_pmic_regulator_enable) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, bool enable) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_get\_voltage**](#function-bsp_pmic_regulator_get_voltage) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, uint16\_t \*millivolts) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_is\_enabled**](#function-bsp_pmic_regulator_is_enabled) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, bool \*enabled) <br> |
 |  const char \* | [**bsp\_pmic\_regulator\_name**](#function-bsp_pmic_regulator_name) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_set\_voltage**](#function-bsp_pmic_regulator_set_voltage) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, uint16\_t millivolts) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_set\_charge\_current**](#function-bsp_pmic_set_charge_current) (uint16\_t milliamps) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_set\_charge\_voltage**](#function-bsp_pmic_set_charge_voltage) (uint16\_t millivolts) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_set\_input\_current\_limit**](#function-bsp_pmic_set_input_current_limit) (uint16\_t milliamps) <br> |
 |  esp\_err\_t | [**bsp\_power\_domain\_get**](#function-bsp_power_domain_get) ([**bsp\_power\_domain\_t**](#enum-bsp_power_domain_t) domain, bool \*enabled) <br> |
 |  const char \* | [**bsp\_power\_domain\_name**](#function-bsp_power_domain_name) ([**bsp\_power\_domain\_t**](#enum-bsp_power_domain_t) domain) <br> |
 |  esp\_err\_t | [**bsp\_power\_domain\_set**](#function-bsp_power_domain_set) ([**bsp\_power\_domain\_t**](#enum-bsp_power_domain_t) domain, bool enable) <br> |
@@ -1402,19 +1452,20 @@ enum bsp_pmic_regulator_t {
     BSP_PMIC_DCDC2,
     BSP_PMIC_DCDC3,
     BSP_PMIC_DCDC4,
-    BSP_PMIC_DCDC5,
     BSP_PMIC_ALDO1,
     BSP_PMIC_ALDO2,
     BSP_PMIC_ALDO3,
     BSP_PMIC_ALDO4,
     BSP_PMIC_BLDO1,
     BSP_PMIC_BLDO2,
+    BSP_PMIC_DLDO1,
+    BSP_PMIC_DLDO2,
     BSP_PMIC_REGULATOR_COUNT
 };
 ```
 
 
-TG28\_SW rails used by the board.
+TG28\_SW rails used by the board. Must stay aligned with tg28\_sw\_regulator\_t.
 ### struct `bsp_pmic_status_t`
 
 
@@ -1494,6 +1545,36 @@ esp_err_t bsp_pmic_get_and_clear_interrupts (
 ) 
 ```
 
+### function `bsp_pmic_get_charge_current`
+
+```c
+esp_err_t bsp_pmic_get_charge_current (
+    uint16_t *milliamps
+) 
+```
+
+
+Read the REG62 constant-current charge limit.
+### function `bsp_pmic_get_charge_voltage`
+
+```c
+esp_err_t bsp_pmic_get_charge_voltage (
+    uint16_t *millivolts
+) 
+```
+
+
+Read the REG64 charge termination voltage.
+### function `bsp_pmic_get_input_current_limit`
+
+```c
+esp_err_t bsp_pmic_get_input_current_limit (
+    uint16_t *milliamps
+) 
+```
+
+
+Read the REG16 input current limit.
 ### function `bsp_pmic_get_status`
 
 ```c
@@ -1512,6 +1593,17 @@ esp_err_t bsp_pmic_init (
 
 
 TG28\_SW access. Regulator writes are explicit and never performed by init.
+### function `bsp_pmic_program_battery_model`
+
+```c
+esp_err_t bsp_pmic_program_battery_model (
+    const uint8_t *model,
+    size_t size
+) 
+```
+
+
+Download and verify a battery-specific fuel-gauge model through REGA1. Call once per boot.
 ### function `bsp_pmic_regulator_enable`
 
 ```c
@@ -1556,6 +1648,36 @@ esp_err_t bsp_pmic_regulator_set_voltage (
 ) 
 ```
 
+### function `bsp_pmic_set_charge_current`
+
+```c
+esp_err_t bsp_pmic_set_charge_current (
+    uint16_t milliamps
+) 
+```
+
+
+Set an exactly representable REG62 constant-current charge limit: 0-200mA in 25mA steps, then 300-1500mA in 100mA steps.
+### function `bsp_pmic_set_charge_voltage`
+
+```c
+esp_err_t bsp_pmic_set_charge_voltage (
+    uint16_t millivolts
+) 
+```
+
+
+Set the REG64 charge termination voltage. Only 3900/4000/4100/4200/4350/4400mV are accepted.
+### function `bsp_pmic_set_input_current_limit`
+
+```c
+esp_err_t bsp_pmic_set_input_current_limit (
+    uint16_t milliamps
+) 
+```
+
+
+Set the REG16 input current limit. Only 100/500/900/1000/1500/2000mA are accepted.
 ### function `bsp_power_domain_get`
 
 ```c
@@ -1603,6 +1725,10 @@ Drive directly controlled domains and optional TG28\_SW rails to safe levels.
 The BSP provides a helper function bsp_camera_start() for initializing the on-board camera module.
 This function sets up the required I2C bus, video subsystem, and camera clock if necessary.
 
+The production module is an OV5640 clocked with a 24 MHz XCLK (`BSP_CAMERA_XCLK_CLOCK_MHZ`); all OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c` enforces this with a compile-time check. Only the DVP video device is initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
+
+Autofocus is not wired up in the BSP yet: the application is expected to drive the VCM (DW9714, pending module-vendor confirmation) through `esp_cam_motor` directly, and EVT1 units run fixed focus. See the TODO note in `bsp_camera.c`.
+
 ### Example Usage
 
 Camera usage can be quite complex. For a complete example, refer to the [`display_camera_video`](https://github.com/espressif/esp-bsp/tree/master/examples/display_camera_video) example in the BSP repository, or to the examples provided in the [`esp_video`](https://github.com/espressif/esp-video-components/tree/master/esp_video) component.
@@ -1639,16 +1765,13 @@ Camera usage can be quite complex. For a complete example, refer to the [`displa
 | define  | [**BSP\_CAMERA\_D7**](#define-bsp_camera_d7)  GPIO\_NUM\_53<br> |
 | define  | [**BSP\_CAMERA\_DEVICE**](#define-bsp_camera_device)  ESP\_VIDEO\_DVP\_DEVICE\_NAME<br> |
 | define  | [**BSP\_CAMERA\_GPIO\_XCLK**](#define-bsp_camera_gpio_xclk)  BSP\_CAMERA\_XCLK<br> |
-| define  | [**BSP\_CAMERA\_HFLIP**](#define-bsp_camera_hflip)  0<br> |
 | define  | [**BSP\_CAMERA\_HSYNC**](#define-bsp_camera_hsync)  GPIO\_NUM\_57<br> |
 | define  | [**BSP\_CAMERA\_PCLK**](#define-bsp_camera_pclk)  GPIO\_NUM\_54<br> |
 | define  | [**BSP\_CAMERA\_PWDN**](#define-bsp_camera_pwdn)  GPIO\_NUM\_40<br> |
-| define  | [**BSP\_CAMERA\_ROTATION**](#define-bsp_camera_rotation)  0<br> |
 | define  | [**BSP\_CAMERA\_RST**](#define-bsp_camera_rst)  GPIO\_NUM\_39<br> |
-| define  | [**BSP\_CAMERA\_VFLIP**](#define-bsp_camera_vflip)  0<br> |
 | define  | [**BSP\_CAMERA\_VSYNC**](#define-bsp_camera_vsync)  GPIO\_NUM\_56<br> |
 | define  | [**BSP\_CAMERA\_XCLK**](#define-bsp_camera_xclk)  GPIO\_NUM\_55<br> |
-| define  | [**BSP\_CAMERA\_XCLK\_CLOCK\_MHZ**](#define-bsp_camera_xclk_clock_mhz)  20<br> |
+| define  | [**BSP\_CAMERA\_XCLK\_CLOCK\_MHZ**](#define-bsp_camera_xclk_clock_mhz)  24<br> |
 
 
 ## Structures and Types Documentation
@@ -1695,21 +1818,27 @@ esp_err_t bsp_camera_stop (
 
 | Type | Name |
 | ---: | :--- |
+| struct | [**bsp\_rtc\_alarm\_t**](#struct-bsp_rtc_alarm_t) <br> |
 | struct | [**bsp\_rtc\_status\_t**](#struct-bsp_rtc_status_t) <br> |
 | struct | [**bsp\_rtc\_time\_t**](#struct-bsp_rtc_time_t) <br> |
 | struct | [**bsp\_shared\_irq\_status\_t**](#struct-bsp_shared_irq_status_t) <br> |
+| type | [**bsp\_shared\_irq\_callback\_t**](#type-bsp_shared_irq_callback_t) <br> |
 
 ## Functions
 
 | Type | Name |
 | ---: | :--- |
 |  esp\_err\_t | [**bsp\_board\_init**](#function-bsp_board_init) (void) <br> |
+|  esp\_err\_t | [**bsp\_rtc\_alarm\_irq\_enable**](#function-bsp_rtc_alarm_irq_enable) (bool enable) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_clear\_interrupt\_flags**](#function-bsp_rtc_clear_interrupt_flags) (uint8\_t \*flags) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_deinit**](#function-bsp_rtc_deinit) (void) <br> |
+|  esp\_err\_t | [**bsp\_rtc\_get\_alarm**](#function-bsp_rtc_get_alarm) ([**bsp\_rtc\_alarm\_t**](#struct-bsp_rtc_alarm_t) \*out\_alarm) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_get\_status**](#function-bsp_rtc_get_status) ([**bsp\_rtc\_status\_t**](#struct-bsp_rtc_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_get\_time**](#function-bsp_rtc_get_time) ([**bsp\_rtc\_time\_t**](#struct-bsp_rtc_time_t) \*time, [**bsp\_rtc\_status\_t**](#struct-bsp_rtc_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_init**](#function-bsp_rtc_init) (void) <br> |
+|  esp\_err\_t | [**bsp\_rtc\_set\_alarm**](#function-bsp_rtc_set_alarm) (const [**bsp\_rtc\_alarm\_t**](#struct-bsp_rtc_alarm_t) \*alarm) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_set\_time**](#function-bsp_rtc_set_time) (const [**bsp\_rtc\_time\_t**](#struct-bsp_rtc_time_t) \*time) <br> |
+|  esp\_err\_t | [**bsp\_shared\_irq\_register\_callback**](#function-bsp_shared_irq_register_callback) ([**bsp\_shared\_irq\_callback\_t**](#type-bsp_shared_irq_callback_t) cb, void \*arg) <br> |
 |  esp\_err\_t | [**bsp\_shared\_irq\_service**](#function-bsp_shared_irq_service) ([**bsp\_shared\_irq\_status\_t**](#struct-bsp_shared_irq_status_t) \*status) <br> |
 
 ## Macros
@@ -1726,6 +1855,29 @@ esp_err_t bsp_camera_stop (
 
 ## Structures and Types Documentation
 
+### struct `bsp_rtc_alarm_t`
+
+
+Alarm compare settings for the RX8130CE. Each `*_en` flag selects whether its field participates in the alarm comparison; day-of-month and weekday are mutually exclusive. With every field disabled the alarm fires once per minute.
+
+Variables:
+
+-  uint8\_t day  *Day of month, 1-31.*
+
+-  bool day\_en  *Compare the day-of-month field.*
+
+-  uint8\_t hour  *Hour, 0-23.*
+
+-  bool hour\_en  *Compare the hour field.*
+
+-  uint8\_t minute  *Minute, 0-59.*
+
+-  bool minute\_en  *Compare the minute field.*
+
+-  uint8\_t weekday  *Weekday, 0 (Sunday) - 6 (Saturday).*
+
+-  bool weekday\_en  *Compare the weekday field.*
+
 ### struct `bsp_rtc_status_t`
 
 
@@ -1735,7 +1887,9 @@ Variables:
 
 -  bool alarm  
 
--  bool backup_voltage_low  
+-  bool backup_battery_full  *VBFF: backup battery charge threshold reached.*
+
+-  bool backup_voltage_low  *VBLF: low backup battery detected.*
 
 -  uint8\_t raw  
 
@@ -1783,6 +1937,14 @@ Variables:
 
 -  unsigned service_passes  
 
+### type `bsp_shared_irq_callback_t`
+
+```c
+typedef void (*bsp_shared_irq_callback_t) (void *arg);
+```
+
+
+Notification callback for the shared GPIO2 interrupt line. It runs in ISR context and must only notify a task (for example with `xTaskNotifyFromISR()`), never service I2C; the task then calls bsp_shared_irq_service().
 
 ## Functions Documentation
 
@@ -1796,6 +1958,16 @@ esp_err_t bsp_board_init (
 
 
 Initialize the board in its disabled, low-risk state.
+### function `bsp_rtc_alarm_irq_enable`
+
+```c
+esp_err_t bsp_rtc_alarm_irq_enable (
+    bool enable
+) 
+```
+
+
+Enable or disable the RX8130CE alarm output on the shared GPIO2 line (AIE). While enabled, a latched alarm holds GPIO2 low until the alarm flag is cleared.
 ### function `bsp_rtc_clear_interrupt_flags`
 
 ```c
@@ -1812,6 +1984,16 @@ esp_err_t bsp_rtc_deinit (
 ) 
 ```
 
+### function `bsp_rtc_get_alarm`
+
+```c
+esp_err_t bsp_rtc_get_alarm (
+    bsp_rtc_alarm_t *out_alarm
+) 
+```
+
+
+Read back the RX8130CE alarm compare settings.
 ### function `bsp_rtc_get_status`
 
 ```c
@@ -1839,6 +2021,16 @@ esp_err_t bsp_rtc_init (
 
 
 RX8130CE access.
+### function `bsp_rtc_set_alarm`
+
+```c
+esp_err_t bsp_rtc_set_alarm (
+    const bsp_rtc_alarm_t *alarm
+) 
+```
+
+
+Program the RX8130CE alarm compare fields. Any latched alarm flag is cleared during reconfiguration; route the alarm to GPIO2 with bsp_rtc_alarm_irq_enable().
 ### function `bsp_rtc_set_time`
 
 ```c
@@ -1847,6 +2039,17 @@ esp_err_t bsp_rtc_set_time (
 ) 
 ```
 
+### function `bsp_shared_irq_register_callback`
+
+```c
+esp_err_t bsp_shared_irq_register_callback (
+    bsp_shared_irq_callback_t cb,
+    void *arg
+) 
+```
+
+
+Register a falling-edge callback for the shared GPIO2 line. The callback runs in ISR context and must only notify a task; the task then services the line with bsp_shared_irq_service(). Pass NULL to unregister.
 ### function `bsp_shared_irq_service`
 
 ```c

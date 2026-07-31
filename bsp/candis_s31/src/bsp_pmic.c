@@ -36,6 +36,14 @@ esp_err_t bsp_pmic_init(void)
     };
     esp_err_t error = tg28_sw_create(bus, &config, &s_pmic);
     if (error == ESP_OK) {
+        /* Clear any latched interrupt status before enabling the power-key
+         * IRQs, like the vendor axp-core driver does at irq-chip init
+         * (write 1 to clear every pending bit), so stale events from the
+         * boot ROM or a previous reset do not fire immediately. */
+        uint8_t pending[3] = {0};
+        error = tg28_sw_get_and_clear_interrupts(s_pmic, pending);
+    }
+    if (error == ESP_OK) {
         error = tg28_sw_configure_power_key_interrupts(s_pmic,
                                                        TG28_SW_POWER_KEY_IRQ_ALL);
     }
@@ -97,6 +105,30 @@ esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_get_charge_current(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_input_current_limit(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_get_input_current_limit(uint16_t *milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_input_current_limit(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_charge_voltage(s_pmic, millivolts);
+}
+
+esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_charge_voltage(s_pmic, millivolts);
 }
 
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)

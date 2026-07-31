@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
 #include "esp_lcd_co5300.h"
@@ -32,6 +33,12 @@ static bool s_deep_standby;
 #define CO5300_SLEEP_TRANSITION_MS       120
 #define CO5300_DEEP_WAKE_RESET_LOW_MS    5
 #define CO5300_RESET_RELEASE_MS          5
+
+/* QSPI panel IO is configured with lcd_cmd_bits=32: commands go on the wire
+ * as (0x02 << 24) | (cmd << 8). This mirrors the tx_param() encoding inside
+ * the esp_lcd_co5300 driver and must be used for every command sent directly
+ * through esp_lcd_panel_io_tx_param(). */
+#define CO5300_QSPI_WRITE_CMD(cmd)       ((0x02UL << 24) | (((uint32_t)(cmd) & 0xFF) << 8))
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 static lv_display_t *s_lvgl_display;
@@ -173,6 +180,21 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config,
         goto fail;
     }
     error = esp_lcd_panel_disp_on_off(s_display.panel, false);
+    if (error != ESP_OK) {
+        goto fail;
+    }
+
+    /* TE is routed from the panel to GPIO16 through R55 (0 ohm) and tearing
+     * output is enabled by the init sequence (0x35). Nothing consumes the
+     * signal yet: the QSPI path has no anti-tearing support. Keep the pin as
+     * a pulled-down input so it has a defined level and stays available for a
+     * future consumer. */
+    const gpio_config_t te_gpio_config = {
+        .pin_bit_mask = BIT64(BSP_LCD_TE),
+        .mode = GPIO_MODE_INPUT,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+    };
+    error = gpio_config(&te_gpio_config);
     if (error != ESP_OK) {
         goto fail;
     }
@@ -356,18 +378,20 @@ lv_display_t *bsp_display_start_with_config(const bsp_display_cfg_t *config)
         bsp_display_stop();
         return NULL;
     }
-    if (bsp_touch_new(NULL, &s_touch) != ESP_OK) {
-        bsp_display_stop();
-        return NULL;
-    }
-    const lvgl_port_touch_cfg_t touch_config = {
-        .disp = s_lvgl_display,
-        .handle = s_touch,
-    };
-    s_lvgl_touch = lvgl_port_add_touch(&touch_config);
-    if (s_lvgl_touch == NULL) {
-        bsp_display_stop();
-        return NULL;
+    /* Touch is optional: during EVT a loose touch FPC must not keep the
+     * screen dark, so a touch failure only disables the input device. */
+    if (bsp_touch_new(NULL, &s_touch) == ESP_OK) {
+        const lvgl_port_touch_cfg_t touch_config = {
+            .disp = s_lvgl_display,
+            .handle = s_touch,
+        };
+        s_lvgl_touch = lvgl_port_add_touch(&touch_config);
+        if (s_lvgl_touch == NULL) {
+            ESP_LOGW(TAG, "touch registration failed, continuing without touch");
+        }
+    } else {
+        s_touch = NULL;
+        ESP_LOGW(TAG, "touch init failed, continuing without touch");
     }
     return s_lvgl_display;
 }
@@ -418,6 +442,15 @@ void bsp_display_unlock(void)
 
 void bsp_display_rotate(lv_display_t *display, lv_display_rotation_t rotation)
 {
+    /* Touch mapping is deliberately left untouched: LVGL 9.5 rotates pointer
+     * input in the core (lv_display_rotate_point() from lv_indev.c) and
+     * esp_lvgl_port feeds raw panel coordinates, so changing the touch
+     * driver's swap/mirror flags here would rotate touches twice.
+     * Display rotation itself is applied to the panel MADCTL by esp_lvgl_port
+     * (sw_rotate is disabled in the BSP default config).
+     * Note: at 90/180 degrees the active GRAM window is row/column asymmetric
+     * (column offset 10, row offset 0), so a 10-20 px shift is possible and
+     * must be measured during EVT. */
     lv_display_set_rotation(display, rotation);
 }
 
@@ -432,7 +465,8 @@ esp_err_t bsp_display_enter_sleep(void)
             return touch_error;
         }
     }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io, LCD_CMD_SLPIN,
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io,
+                        CO5300_QSPI_WRITE_CMD(LCD_CMD_SLPIN),
                         NULL, 0), TAG, "display sleep-in failed");
     vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
     return ESP_OK;
@@ -444,7 +478,8 @@ esp_err_t bsp_display_exit_sleep(void)
                         "display is not initialized");
     ESP_RETURN_ON_FALSE(!s_deep_standby, ESP_ERR_INVALID_STATE, TAG,
                         "display is in deep standby");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io, LCD_CMD_SLPOUT,
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io,
+                        CO5300_QSPI_WRITE_CMD(LCD_CMD_SLPOUT),
                         NULL, 0),
                         TAG, "display sleep-out failed");
     vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
@@ -468,8 +503,8 @@ esp_err_t bsp_display_enter_deep_standby(void)
                         "display sleep-in before deep standby failed");
     const uint8_t parameter = CO5300_DEEP_STANDBY_PARAMETER;
     ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(s_display.io,
-                        CO5300_CMD_DEEP_STANDBY_ON, &parameter,
-                        sizeof(parameter)), TAG,
+                        CO5300_QSPI_WRITE_CMD(CO5300_CMD_DEEP_STANDBY_ON),
+                        &parameter, sizeof(parameter)), TAG,
                         "display deep-standby command failed");
     s_deep_standby = true;
     return ESP_OK;

@@ -14,6 +14,13 @@ static const char *TAG = "candis_camera";
 static esp_cam_sensor_xclk_handle_t s_xclk;
 static bool s_started;
 
+/* The OV5640 register tables in esp_cam_sensor (sensors/ov5640) are all
+ * calculated for a 24 MHz XCLK input ("24M input" in every format option);
+ * any other frequency shifts frame rate and exposure timing.
+ * BSP_CAMERA_XCLK_CLOCK_MHZ must stay 24. */
+_Static_assert(BSP_CAMERA_XCLK_CLOCK_MHZ == 24,
+               "OV5640 sensor register tables assume a 24 MHz XCLK");
+
 esp_err_t bsp_camera_start(const bsp_camera_cfg_t *cfg)
 {
     (void)cfg;
@@ -24,6 +31,14 @@ esp_err_t bsp_camera_start(const bsp_camera_cfg_t *cfg)
     ESP_RETURN_ON_ERROR(bsp_peripheral_power_set(BSP_PERIPHERAL_CAMERA, true),
                         TAG, "camera power-up failed");
 
+    /* NOTE: XCLK ends up driven twice. This LEDC channel outputs on
+     * BSP_CAMERA_XCLK first, then esp_video_init_with_flags() routes the DVP
+     * controller's own camera clock to the same pin (esp_video_init.c calls
+     * esp_cam_ctlr_dvp_output_clock when xclk_io >= 0 && xclk_freq > 0),
+     * which silently wins the GPIO matrix output selection and leaves the
+     * LEDC channel redundant. Same flow as the official esp32_s31_korvo_1
+     * BSP; kept because it is harmless while both clocks are 24 MHz.
+     * EVT: probe the XCLK pin and confirm the effective clock is 24 MHz. */
     const esp_cam_sensor_xclk_config_t xclk_config = {
         .ledc_cfg = {
             .timer = LEDC_TIMER_1,
@@ -64,10 +79,21 @@ esp_err_t bsp_camera_start(const bsp_camera_cfg_t *cfg)
         },
         .xclk_freq = BSP_CAMERA_XCLK_CLOCK_MHZ * 1000000,
     };
+    /* TODO(af): the production OV5640 module has autofocus. The agreed route
+     * is for the application to drive the VCM directly through esp_cam_motor
+     * (DW9714, SCCB address 0x0C - the VCM model still awaits written
+     * confirmation from the module vendor), so this BSP intentionally leaves
+     * esp_video_init_config_t.cam_motor unset. Once the VCM is confirmed:
+     * enable CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER and
+     * CONFIG_CAM_MOTOR_DW9714, fill in cam_motor here and OR
+     * ESP_VIDEO_INIT_FLAGS_MOTOR into the init flags below. EVT1 fallback is
+     * fixed focus (AF unused). */
     const esp_video_init_config_t video_config = {
         .dvp = &dvp_config,
     };
-    error = esp_video_init(&video_config);
+    /* Only the DVP device is initialized; the plain esp_video_init() would
+     * initialize every video device enabled in sdkconfig (ISP, JPEG, ...). */
+    error = esp_video_init_with_flags(&video_config, ESP_VIDEO_INIT_FLAGS_DVP);
     if (error == ESP_OK) {
         s_started = true;
         return ESP_OK;
@@ -88,7 +114,8 @@ esp_err_t bsp_camera_stop(void)
     if (!s_started) {
         return bsp_peripheral_power_set(BSP_PERIPHERAL_CAMERA, false);
     }
-    esp_err_t result = esp_video_deinit();
+    /* Tear down only what bsp_camera_start() initialized */
+    esp_err_t result = esp_video_deinit_with_flags(ESP_VIDEO_INIT_FLAGS_DVP);
     if (s_xclk != NULL) {
         const esp_err_t stop_error = esp_cam_sensor_xclk_stop(s_xclk);
         if (result == ESP_OK && stop_error != ESP_OK) {

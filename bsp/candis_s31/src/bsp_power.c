@@ -75,6 +75,24 @@ static esp_err_t configure_output(gpio_num_t gpio, uint32_t level)
     return gpio_set_level(gpio, level);
 }
 
+/* Park the given pins as floating inputs (no pull-up/pull-down) so they
+ * cannot back-feed a peripheral whose supply is about to be removed. */
+static esp_err_t tristate_pins(const gpio_num_t *gpios, size_t count)
+{
+    uint64_t mask = 0;
+    for (size_t index = 0; index < count; ++index) {
+        mask |= 1ULL << gpios[index];
+    }
+    const gpio_config_t config = {
+        .pin_bit_mask = mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    return gpio_config(&config);
+}
+
 static esp_err_t regulator_start(bsp_pmic_regulator_t regulator, uint16_t millivolts)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_regulator_set_voltage(regulator, millivolts), TAG,
@@ -98,11 +116,17 @@ esp_err_t bsp_power_safe_state(void)
                             TAG, "direct power domain disable failed");
     }
     ESP_RETURN_ON_ERROR(camera_control_pins(), TAG, "camera safe state failed");
+    /* Drive the RGB data line and the touch reset line low so neither an
+     * unpowered LED strip nor the touch controller is held by a high pin. */
+    ESP_RETURN_ON_ERROR(configure_output(BSP_LED_RGB_IO, 0), TAG,
+                        "RGB data safe state failed");
+    ESP_RETURN_ON_ERROR(configure_output(BSP_TOUCH_RST, 0), TAG,
+                        "touch reset safe state failed");
 
     /* These rails feed only optional peripherals in schematic revision 0.5. */
     const bsp_pmic_regulator_t optional_rails[] = {
         BSP_PMIC_ALDO1, BSP_PMIC_ALDO2, BSP_PMIC_ALDO3, BSP_PMIC_ALDO4,
-        BSP_PMIC_BLDO1, BSP_PMIC_BLDO2, BSP_PMIC_DCDC2,
+        BSP_PMIC_BLDO1, BSP_PMIC_BLDO2, BSP_PMIC_DCDC2, BSP_PMIC_DCDC4,
     };
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW safe-state access failed");
     for (size_t index = 0; index < sizeof(optional_rails) / sizeof(optional_rails[0]); ++index) {
@@ -143,6 +167,9 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
     switch (peripheral) {
     case BSP_PERIPHERAL_DISPLAY:
         if (enable) {
+            /* Power-up sequence required by the CO5300 QSPI AMOLED:
+             * ALDO1 sources the VCI rail, then VBAT, then VCI after 2ms,
+             * and the panel needs ~10ms before it accepts commands. */
             ESP_RETURN_ON_ERROR(regulator_start(BSP_PMIC_ALDO1, 3300), TAG,
                                 "LCD VCI source failed");
             ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_DISPLAY_VBAT, true),
@@ -153,6 +180,8 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
             vTaskDelay(pdMS_TO_TICKS(10));
             return ESP_OK;
         }
+        /* Power-down is the reverse order: VCI first, then VBAT after 2ms,
+         * and finally the ALDO1 source. */
         ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_DISPLAY_VCI, false), TAG,
                             "LCD VCI disable failed");
         vTaskDelay(pdMS_TO_TICKS(2));
@@ -197,6 +226,17 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
         }
         ESP_RETURN_ON_ERROR(camera_control_pins(), TAG,
                             "camera control pins failed");
+        /* Hi-Z the DVP data and sync pins before removing the supplies so
+         * they cannot back-feed the unpowered sensor. The video driver
+         * reconfigures these pins on the next power-up. */
+        const gpio_num_t camera_data_pins[] = {
+            BSP_CAMERA_D0, BSP_CAMERA_D1, BSP_CAMERA_D2, BSP_CAMERA_D3,
+            BSP_CAMERA_D4, BSP_CAMERA_D5, BSP_CAMERA_D6, BSP_CAMERA_D7,
+            BSP_CAMERA_PCLK, BSP_CAMERA_XCLK, BSP_CAMERA_VSYNC, BSP_CAMERA_HSYNC,
+        };
+        ESP_RETURN_ON_ERROR(tristate_pins(camera_data_pins,
+                                          sizeof(camera_data_pins) / sizeof(camera_data_pins[0])),
+                            TAG, "camera data pins hi-Z failed");
         ESP_RETURN_ON_ERROR(bsp_pmic_regulator_enable(BSP_PMIC_DCDC2, false), TAG,
                             "camera DVDD disable failed");
         ESP_RETURN_ON_ERROR(bsp_pmic_regulator_enable(BSP_PMIC_ALDO4, false), TAG,
@@ -204,11 +244,43 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
         return bsp_pmic_regulator_enable(BSP_PMIC_BLDO1, false);
 
     case BSP_PERIPHERAL_SDCARD:
-        ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_SDCARD, enable), TAG,
-                            "SD card power switch failed");
         if (enable) {
+            ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_SDCARD, true), TAG,
+                                "SD card power switch failed");
             vTaskDelay(pdMS_TO_TICKS(10));
+            /* Restore a neutral pin state once the rail is up: card-detect
+             * gets its pull-up back and the bus pins float. The sdmmc
+             * driver applies its own pin configuration when the card is
+             * mounted, so this only covers the unmounted idle state. */
+            const gpio_config_t detect_config = {
+                .pin_bit_mask = 1ULL << BSP_SD_DET,
+                .mode = GPIO_MODE_INPUT,
+                .pull_up_en = GPIO_PULLUP_ENABLE,
+                .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                .intr_type = GPIO_INTR_DISABLE,
+            };
+            ESP_RETURN_ON_ERROR(gpio_config(&detect_config), TAG,
+                                "SD card-detect restore failed");
+            const gpio_num_t sd_bus_pins[] = {
+                BSP_SD_D0, BSP_SD_D1, BSP_SD_D2, BSP_SD_D3,
+                BSP_SD_CLK, BSP_SD_CMD,
+            };
+            return tristate_pins(sd_bus_pins,
+                                 sizeof(sd_bus_pins) / sizeof(sd_bus_pins[0]));
         }
+        /* Hi-Z the card-detect and bus pins before opening the P-MOS
+         * (BSP_SD_POWER_EN goes high) so they cannot back-feed the
+         * unpowered card, then give the rail a moment to collapse. */
+        const gpio_num_t sd_pins[] = {
+            BSP_SD_DET, BSP_SD_D0, BSP_SD_D1, BSP_SD_D2, BSP_SD_D3,
+            BSP_SD_CLK, BSP_SD_CMD,
+        };
+        ESP_RETURN_ON_ERROR(tristate_pins(sd_pins,
+                                          sizeof(sd_pins) / sizeof(sd_pins[0])),
+                            TAG, "SD card pins hi-Z failed");
+        ESP_RETURN_ON_ERROR(bsp_power_domain_set(BSP_POWER_SDCARD, false), TAG,
+                            "SD card power switch failed");
+        vTaskDelay(pdMS_TO_TICKS(2));
         return ESP_OK;
 
     case BSP_PERIPHERAL_EXTERNAL_3V3:

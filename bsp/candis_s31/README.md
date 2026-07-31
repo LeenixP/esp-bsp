@@ -45,6 +45,31 @@ voltage choices, enable ordering, and shutdown behavior stay in this BSP.
 RX8130CE RTC and FUSB303B Type-C support are implemented locally because no
 matching registry components are currently used by this board.
 
+The board uses the switch-charger variant of the TG28 (I2C address 0x34 on
+the low-power bus). It exposes twelve rails through `bsp_pmic_regulator_*`:
+DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, and DLDO1-DLDO2. The linear-charger
+variant's DCDC5 does not exist here. DLDO1 is strapped in SWITCH mode and
+passes DCDC1 (3.3V) through to the RGB LED; DLDO2 is an unconnected spare.
+Charger control covers the constant-current limit (0-200mA in 25mA steps,
+then 300-1500mA in 100mA steps), the discrete input current limit
+(100/500/900/1000/1500/2000mA), and the discrete charge termination voltage
+(3900/4000/4100/4200/4350/4400mV). `bsp_pmic_init()` clears any latched
+interrupt status before enabling the power-key interrupts.
+
+## Third-party notices
+
+- The CO5300 initialization sequence in `bsp_display.c` is converted from the
+  AM200Q460460LK module supplier's reference material. Its license status is
+  being confirmed with the supplier; treat the sequence as supplier-provided
+  reference data until that confirmation is complete.
+- Touch support resolves `espressif/esp_lcd_touch_cst820` to the in-tree copy
+  under `components/lcd_touch/esp_lcd_touch_cst820` (Apache-2.0) through
+  `override_path` instead of pulling a registry package. The registry package
+  previously used for this controller (`kodediy/esp_lcd_touch_cst820`)
+  shipped stale build artifacts, and the in-tree copy keeps the
+  module-specific CST820 report handling maintainable. It remains the
+  Espressif `esp_lcd_touch` driver and is functionally equivalent.
+
 ## Compatible BSP examples
 
 <div align="center">
@@ -80,11 +105,72 @@ boot strapping. They are not normal application GPIOs. `BSP_CAPS_BUTTONS` is
 therefore zero and the generic audio example, which expects application
 buttons and SPIFFS content, is not listed.
 
+## RTC and shared interrupt line
+
+The RX8130CE RTC sits on the low-power I2C bus. `bsp_rtc_get_time()` and
+`bsp_rtc_set_time()` handle the calendar; `bsp_rtc_set_alarm()` programs the
+alarm compare fields, and `bsp_rtc_alarm_irq_enable()` switches the RTC's
+active-low `/IRQ` output (`AIE`) without touching the compare settings. In
+`bsp_rtc_alarm_t` each `*_en` flag includes its field in the comparison;
+day-of-month and weekday are mutually exclusive because both share one
+register in the RTC. With every field disabled the alarm fires once per
+minute.
+
+The RTC `/IRQ` and the TG28_SW interrupt are wired-ANDed onto
+`BSP_PMIC_RTC_INT` (GPIO2, active low) through a buffer. Once
+`bsp_rtc_alarm_irq_enable(true)` is in effect, a latched RTC alarm pulls
+GPIO2 low and keeps it low until the flag is cleared; the line stays low
+while either device has a pending event.
+
+`bsp_shared_irq_service()` drains both devices over I2C until the line
+releases and reports the combined flags. It can be polled from a task, or
+driven by an interrupt: `bsp_shared_irq_register_callback()` installs a
+falling-edge GPIO handler whose callback runs in ISR context and must only
+notify (for example `xTaskNotifyFromISR()`); the actual I2C servicing still
+happens in task context by calling `bsp_shared_irq_service()`. Passing a NULL
+callback removes the handler again. Register the callback after
+`bsp_board_init()`, which configures the pin with interrupts disabled.
+
+## Display and touch
+
+The on-board 2.0-inch CO5300 AMOLED (QSPI, 466x466 panel, 460x460 visible window) and the CST820 capacitive touch panel (I2C, `BSP_I2C_NUM`) are both initialized by `bsp_display_start()`.
+
+- **Sleep:** `bsp_display_enter_sleep()` / `bsp_display_exit_sleep()` put the panel into/out of sleep-in mode and put the CST820 into deep sleep. The touch controller has no wake pin, so `bsp_display_exit_sleep()` resets it over its RST GPIO and re-checks its chip ID.
+- **Deep standby:** `bsp_display_enter_deep_standby()` additionally sends the CO5300 deep-standby command (RAM content lost). After `bsp_display_exit_deep_standby()` the full display pipeline is rebuilt, but LVGL widgets/screens are not recreated automatically; the application must show its screen again (e.g. `lv_screen_load()`).
+- **Rotation:** `bsp_display_rotate()` rotates in software (LVGL rendering). On LVGL 9.5 the touch coordinates follow the display rotation automatically. 90/180-degree rotation may show a small offset on this panel; verify on hardware before relying on it.
+- **TE limitation:** the tearing-effect pin is wired and the panel's TE output is enabled at init, but the QSPI display path cannot use TE for anti-tearing. Avoid fast full-screen scroll animations in the UI.
+- **Touch is optional:** if the CST820 is missing or fails to initialize, `bsp_display_start()` still succeeds and logs a warning; the display keeps working without touch input.
+
+See [API.md](API.md) for the full function reference.
+
 ## Camera module
 
 The connector exposes an 8-bit DVP bus. The production camera module uses an
 OV5640 with autofocus, and the checked-in camera example selects its
 800 x 600 RGB565 DVP mode. Select the corresponding `esp_cam_sensor` option if
 a different module is fitted.
+
+The sensor is clocked with a 24 MHz XCLK (`BSP_CAMERA_XCLK_CLOCK_MHZ`); all
+OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c`
+enforces this with a compile-time check. Only the DVP video device is
+initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
+
+Autofocus is not wired up in the BSP yet: the application is expected to drive
+the VCM (DW9714, pending module-vendor confirmation) through `esp_cam_motor`
+directly, and EVT1 units run fixed focus. See the TODO note in
+`bsp_camera.c`.
+
+## Audio codec
+
+The ES8389 codec sits on the main I2C bus (address 0x20) and on I2S
+(MCLK=GPIO35, BCLK=GPIO18, WS=GPIO19, DOUT=GPIO8, DIN=GPIO44); the speaker
+amplifier enable is GPIO42. The BSP clocks the codec from MCLK
+(`use_mclk=true`), which also avoids the es8389 driver's BCLK-derived
+coefficient lookup that has no entry for the default 22050 Hz sample rate.
+
+Speaker and microphone are separate `esp_codec_dev` instances over the same
+chip; whichever side is opened last soft-resets the whole codec. If both
+directions are used, re-verify the speaker -> mic -> speaker sequence (see
+the note in `bsp_audio.c`).
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)

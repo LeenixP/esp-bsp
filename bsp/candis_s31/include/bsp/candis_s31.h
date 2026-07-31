@@ -29,6 +29,7 @@
 #include "esp_vfs_fat.h"
 #include "led_indicator.h"
 #include "esp_video_device.h"
+#include "rx8130ce.h"
 #include "sdkconfig.h"
 
 #include "bsp/config.h"
@@ -215,10 +216,7 @@
 #define BSP_CAMERA_VSYNC                       GPIO_NUM_56
 #define BSP_CAMERA_HSYNC                       GPIO_NUM_57
 #define BSP_CAMERA_DEVICE                      ESP_VIDEO_DVP_DEVICE_NAME
-#define BSP_CAMERA_XCLK_CLOCK_MHZ              20
-#define BSP_CAMERA_VFLIP                       0
-#define BSP_CAMERA_HFLIP                       0
-#define BSP_CAMERA_ROTATION                    0
+#define BSP_CAMERA_XCLK_CLOCK_MHZ              24
 /** @} */
 
 /** @addtogroup g99_others
@@ -233,8 +231,9 @@
 #define BSP_FUSB303B_I2C_ADDRESS_HIGH          0x31
 /** @} */
 
-/* GPIO26-GPIO32 are reserved for flash and VDD_SPI. GPIO37, GPIO60, and
- * GPIO61 are boot strapping pins. GPIO41 is not available to applications. */
+/* GPIO26/27/28/30/31/32 are reserved for flash and VDD_SPI (there is no
+ * GPIO29). GPIO36, GPIO37, GPIO60, and GPIO61 are boot strapping pins.
+ * GPIO41 is not available to applications. */
 
 /** @addtogroup g09_battery
  *  @{
@@ -261,19 +260,20 @@ typedef enum {
     BSP_PERIPHERAL_COUNT,
 } bsp_peripheral_t;
 
-/** TG28_SW rails used by the board. */
+/** TG28_SW rails used by the board. Must stay aligned with tg28_sw_regulator_t. */
 typedef enum {
     BSP_PMIC_DCDC1 = 0,
     BSP_PMIC_DCDC2,
     BSP_PMIC_DCDC3,
     BSP_PMIC_DCDC4,
-    BSP_PMIC_DCDC5,
     BSP_PMIC_ALDO1,
     BSP_PMIC_ALDO2,
     BSP_PMIC_ALDO3,
     BSP_PMIC_ALDO4,
     BSP_PMIC_BLDO1,
     BSP_PMIC_BLDO2,
+    BSP_PMIC_DLDO1,
+    BSP_PMIC_DLDO2,
     BSP_PMIC_REGULATOR_COUNT,
 } bsp_pmic_regulator_t;
 
@@ -314,7 +314,11 @@ typedef struct {
     bool update;
     bool reset;
     bool backup_voltage_low;
+    bool backup_battery_full;
 } bsp_rtc_status_t;
+
+/** Alarm compare settings, aliased from the RX8130CE driver. */
+typedef rx8130ce_alarm_t bsp_rtc_alarm_t;
 /** @} */
 
 /** @addtogroup g07_usb
@@ -360,6 +364,9 @@ typedef struct {
     unsigned service_passes;
     bool line_released;
 } bsp_shared_irq_status_t;
+
+/** Callback invoked from ISR context when the shared interrupt line asserts. */
+typedef void (*bsp_shared_irq_callback_t)(void *arg);
 /** @} */
 
 /** @addtogroup g06_led
@@ -456,6 +463,10 @@ esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
 esp_err_t bsp_pmic_get_power_on_source(uint8_t *source);
 esp_err_t bsp_pmic_set_charge_current(uint16_t milliamps);
 esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps);
+esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps);
+esp_err_t bsp_pmic_get_input_current_limit(uint16_t *milliamps);
+esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts);
+esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts);
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size);
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_t millivolts);
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);
@@ -474,10 +485,16 @@ esp_err_t bsp_rtc_deinit(void);
 esp_err_t bsp_rtc_get_time(bsp_rtc_time_t *time, bsp_rtc_status_t *status);
 esp_err_t bsp_rtc_set_time(const bsp_rtc_time_t *time);
 esp_err_t bsp_rtc_get_status(bsp_rtc_status_t *status);
+esp_err_t bsp_rtc_set_alarm(const bsp_rtc_alarm_t *alarm);
+esp_err_t bsp_rtc_get_alarm(bsp_rtc_alarm_t *out_alarm);
+esp_err_t bsp_rtc_alarm_irq_enable(bool enable);
 esp_err_t bsp_rtc_clear_interrupt_flags(uint8_t *flags);
 
 /** Service TG28_SW and RX8130CE until their shared interrupt line is released. */
 esp_err_t bsp_shared_irq_service(bsp_shared_irq_status_t *status);
+
+/** Register a callback for the shared active-low interrupt line on GPIO2. */
+esp_err_t bsp_shared_irq_register_callback(bsp_shared_irq_callback_t cb, void *arg);
 /** @} */
 
 /** @addtogroup g07_usb
