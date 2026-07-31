@@ -1,7 +1,5 @@
 # ESP LCD Touch CST820 Controller
 
-[![Component Registry](https://components.espressif.com/components/espressif/esp_lcd_touch_cst820/badge.svg)](https://components.espressif.com/components/espressif/esp_lcd_touch_cst820)
-
 ESP-IDF driver for CST820 capacitive touch controllers. It uses the common
 `esp_lcd_touch` API and communicates through I2C.
 
@@ -23,14 +21,17 @@ read after the controller wakes on a touch event.
 
 ## Add the component
 
-Add the released component to an ESP-IDF project:
+Once the component is published to the ESP Component Registry, add it to an
+ESP-IDF project with:
 
 ```sh
 idf.py add-dependency "espressif/esp_lcd_touch_cst820^1.0.0"
 ```
 
-The Component Manager writes the dependency to `main/idf_component.yml` and
-downloads it during the next configure or build.
+This command is available after registry publication. Until then, reference a
+local checkout with `override_path` in `idf_component.yml` instead. After
+publication, the Component Manager writes the dependency to
+`main/idf_component.yml` and downloads it during the next configure or build.
 
 ## Initialize the controller
 

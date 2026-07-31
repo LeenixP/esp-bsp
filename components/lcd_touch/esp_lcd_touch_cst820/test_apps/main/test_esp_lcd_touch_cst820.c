@@ -12,11 +12,16 @@
 #include "unity.h"
 #include "unity_test_runner.h"
 
+/* Hardcoded wiring of the Candis-S31 test board this test app runs on
+ * (same convention as the other lcd_touch test apps). Adjust these defines
+ * when running on a different board. */
 #define TEST_TOUCH_I2C_PORT       (0)
 #define TEST_TOUCH_I2C_SDA        (GPIO_NUM_8)
 #define TEST_TOUCH_I2C_SCL        (GPIO_NUM_18)
 #define TEST_TOUCH_GPIO_INT       (GPIO_NUM_3)
 #define TEST_TOUCH_GPIO_RST       (GPIO_NUM_7)
+/* Only needs to cover the controller's native coordinate range; not tied to
+ * the display panel resolution. */
 #define TEST_TOUCH_H_RES          (460)
 #define TEST_TOUCH_V_RES          (460)
 

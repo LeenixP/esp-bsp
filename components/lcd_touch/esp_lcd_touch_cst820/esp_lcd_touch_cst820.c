@@ -187,8 +187,13 @@ static esp_err_t esp_lcd_touch_cst820_get_track_id(esp_lcd_touch_handle_t tp, ui
     ESP_RETURN_ON_FALSE(max_point_num > 0, ESP_ERR_INVALID_ARG, TAG,
                         "Track ID array must contain at least one element");
 
+    /* tp->data.coords is sized by CONFIG_ESP_LCD_TOUCH_MAX_POINTS; clamp the
+     * caller-supplied array size so it cannot read past the internal buffer. */
+    const uint8_t point_num = max_point_num > CONFIG_ESP_LCD_TOUCH_MAX_POINTS ?
+                              CONFIG_ESP_LCD_TOUCH_MAX_POINTS : max_point_num;
+
     portENTER_CRITICAL(&tp->data.lock);
-    for (size_t i = 0; i < max_point_num; i++) {
+    for (size_t i = 0; i < point_num; i++) {
         track_id[i] = tp->data.coords[i].track_id;
     }
     portEXIT_CRITICAL(&tp->data.lock);
