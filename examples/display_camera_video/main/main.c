@@ -137,6 +137,7 @@ static void camera_video_frame_operation(uint8_t *camera_buf, uint8_t camera_buf
 #if SOC_PPA_SUPPORTED
     ppa_srm_rotation_angle_t rotation = PPA_SRM_ROTATION_ANGLE_0;
 
+#if defined(BSP_CAMERA_ROTATION)
     switch (BSP_CAMERA_ROTATION) {
     case 0:
         rotation = PPA_SRM_ROTATION_ANGLE_0;
@@ -151,13 +152,18 @@ static void camera_video_frame_operation(uint8_t *camera_buf, uint8_t camera_buf
         rotation = PPA_SRM_ROTATION_ANGLE_270;
         break;
     }
+#endif
 
     /* Get size of camera for screen (by aspect ratio)  */
+#if defined(BSP_CAMERA_ROTATION)
     if (BSP_CAMERA_ROTATION == 90 || BSP_CAMERA_ROTATION == 270) {
         calc_aspect_fit(camera_buf_ves, camera_buf_hes, BSP_LCD_H_RES, BSP_LCD_V_RES, &out_w, &out_h);
     } else {
         calc_aspect_fit(camera_buf_hes, camera_buf_ves, BSP_LCD_H_RES, BSP_LCD_V_RES, &out_w, &out_h);
     }
+#else
+    calc_aspect_fit(camera_buf_hes, camera_buf_ves, BSP_LCD_H_RES, BSP_LCD_V_RES, &out_w, &out_h);
+#endif
 
     /* Scale camera picture for the screen + rotation */
     app_image_process_scale_crop(
