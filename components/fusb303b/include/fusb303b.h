@@ -97,12 +97,58 @@ esp_err_t fusb303b_set_enabled(fusb303b_handle_t handle, bool enabled);
 esp_err_t fusb303b_set_global_interrupt_mask(fusb303b_handle_t handle,
         bool masked);
 
+/**
+ * @name Mask register (0Eh) bits for fusb303b_set_interrupt_mask()
+ *
+ * A set bit stops the matching Interrupt (14h) bit from asserting the INT_N
+ * pin; the interrupt bit itself still sets (datasheet Table 19, note 12).
+ * Bit 7 is reserved: keep it clear.
+ * @{
+ */
+#define FUSB303B_MASK_ORIENT        (1U << 6)  /*!< I_ORIENT: orientation resolved */
+#define FUSB303B_MASK_FAULT         (1U << 5)  /*!< I_FAULT: CC voltage outside the Rd range */
+#define FUSB303B_MASK_VBUS_CHG      (1U << 4)  /*!< I_VBUS_CHG: VBUS crossed a threshold */
+#define FUSB303B_MASK_AUTOSNK       (1U << 3)  /*!< I_AUTOSNK: AUTOSNK mode entered or left */
+#define FUSB303B_MASK_BC_LVL        (1U << 2)  /*!< I_BC_LVL: advertised current level changed */
+#define FUSB303B_MASK_DETACH        (1U << 1)  /*!< I_DETACH: device or accessory detached */
+#define FUSB303B_MASK_ATTACH        (1U << 0)  /*!< I_ATTACH: device or accessory attached */
+/** @} */
+
+/**
+ * @name Mask1 register (0Fh) bits for fusb303b_set_interrupt_mask()
+ *
+ * Same masking rule as the Mask register (datasheet Table 20, note 13).
+ * Bits 7 and 4 are reserved: keep them clear.
+ * @{
+ */
+#define FUSB303B_MASK1_REM_VBOFF    (1U << 6)  /*!< I_REM_VBOFF: remedy asks for VBUS off and discharge */
+#define FUSB303B_MASK1_REM_VBON     (1U << 5)  /*!< I_REM_VBON: remedy asks for VBUS on */
+#define FUSB303B_MASK1_REM_FAIL     (1U << 3)  /*!< I_REM_FAIL: remedy attach failed */
+#define FUSB303B_MASK1_FRC_FAIL     (1U << 2)  /*!< I_FRC_FAIL: FORCE_SRC/FORCE_SNK failed */
+#define FUSB303B_MASK1_FRC_SUCC     (1U << 1)  /*!< I_FRC_SUCC: FORCE_SRC/FORCE_SNK succeeded */
+#define FUSB303B_MASK1_REMEDY       (1U << 0)  /*!< I_REMEDY: remedy attach triggered */
+/** @} */
+
+/**
+ * Set the per-event interrupt masks: the Mask (0Eh) and Mask1 (0Fh)
+ * registers. A set bit keeps the matching interrupt off the INT_N pin
+ * without affecting the interrupt bit itself.
+ */
+esp_err_t fusb303b_set_interrupt_mask(fusb303b_handle_t handle, uint8_t mask,
+                                      uint8_t mask1);
+
 /** Select the power role and source current advertisement. */
 esp_err_t fusb303b_set_role(fusb303b_handle_t handle,
                             fusb303b_role_t role,
                             fusb303b_current_t current);
 
-/** Read connection state and optionally clear all reported interrupts. */
+/**
+ * Read connection state and optionally clear all reported interrupts.
+ *
+ * The status, type, and interrupt fields are a live register snapshot;
+ * device_id and device_type are the read-only identity values verified and
+ * cached by fusb303b_create().
+ */
 esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
                               fusb303b_status_t *status,
                               bool clear_interrupts);
@@ -111,6 +157,23 @@ esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
 esp_err_t fusb303b_get_and_clear_interrupts(fusb303b_handle_t handle,
         uint8_t *interrupt,
         uint8_t *interrupt1);
+
+/**
+ * Board-level escape hatch: read one FUSB303B register directly.
+ *
+ * It exists for board policy the typed API does not cover (for example
+ * audio-accessory support or Try.SNK/Try.SRC configuration); regular
+ * applications should not need it.
+ */
+esp_err_t fusb303b_read_register(fusb303b_handle_t handle, uint8_t reg,
+                                 uint8_t *value);
+
+/**
+ * Board-level escape hatch: write one FUSB303B register directly.
+ * Same scope and caution as fusb303b_read_register().
+ */
+esp_err_t fusb303b_write_register(fusb303b_handle_t handle, uint8_t reg,
+                                  uint8_t value);
 
 #ifdef __cplusplus
 }

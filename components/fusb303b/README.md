@@ -55,14 +55,20 @@ unrelated role and timing fields.
 
 ## Status and interrupts
 
-`fusb303b_get_status()` reads identity, connection, type, and both interrupt
-registers in one snapshot. Passing `clear_interrupts=true` writes the values
-back to the two write-one-to-clear registers after the snapshot has been
-decoded.
+`fusb303b_get_status()` reads connection, type, and both interrupt registers
+in one snapshot and reports the identity registers verified and cached at
+create time. Passing `clear_interrupts=true` writes the values back to the
+two write-one-to-clear registers after the snapshot has been decoded.
 
 The global interrupt mask is controlled separately by
-`fusb303b_set_global_interrupt_mask()`. Per-event masks, GPIO interrupt
-registration, and USB data-role switching remain board or application policy.
+`fusb303b_set_global_interrupt_mask()`, and the per-event Mask (0Eh) and
+Mask1 (0Fh) registers are programmed with `fusb303b_set_interrupt_mask()`.
+Masking only keeps an event off the INT_N pin; the interrupt bit itself
+still sets. GPIO interrupt registration and USB data-role switching remain
+board or application policy. `fusb303b_read_register()` and
+`fusb303b_write_register()` give board implementations raw register access
+for configuration the typed API does not cover; regular applications should
+not need them.
 
 ## Reference
 

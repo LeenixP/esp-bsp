@@ -16,6 +16,7 @@
 #define FUSB303B_REG_CONTROL            0x04
 #define FUSB303B_REG_CONTROL1           0x05
 #define FUSB303B_REG_MANUAL             0x09
+#define FUSB303B_REG_MASK               0x0E
 #define FUSB303B_REG_STATUS             0x11
 #define FUSB303B_REG_INTERRUPT          0x14
 
@@ -37,6 +38,8 @@
 struct fusb303b_device_t {
     i2c_master_dev_handle_t i2c_device;
     uint8_t device_address;
+    uint8_t device_id;      /* Read-only identity, cached by create */
+    uint8_t device_type;    /* Read-only identity, cached by create */
 };
 
 static const char *TAG = "fusb303b";
@@ -114,6 +117,12 @@ esp_err_t fusb303b_create(i2c_master_bus_handle_t bus,
             !fusb303b_is_supported_identity(identity[0], identity[1])) {
         error = ESP_ERR_INVALID_RESPONSE;
     }
+    if (error == ESP_OK) {
+        /* The identity registers are read-only: read them once here and
+         * serve them from the handle in fusb303b_get_status(). */
+        handle->device_id = identity[0];
+        handle->device_type = identity[1];
+    }
     if (error != ESP_OK) {
         if (handle->i2c_device != NULL) {
             i2c_master_bus_rm_device(handle->i2c_device);
@@ -149,6 +158,16 @@ esp_err_t fusb303b_set_global_interrupt_mask(fusb303b_handle_t handle,
     return fusb303b_update_bits(handle, FUSB303B_REG_CONTROL,
                                 FUSB303B_CONTROL_INT_MASK,
                                 masked ? FUSB303B_CONTROL_INT_MASK : 0);
+}
+
+esp_err_t fusb303b_set_interrupt_mask(fusb303b_handle_t handle, uint8_t mask,
+                                      uint8_t mask1)
+{
+    /* Mask (0Eh) and Mask1 (0Fh) are consecutive plain R/W registers and the
+     * FUSB303B auto-increments the register address on multi-byte writes, so
+     * both are programmed in one transfer. */
+    const uint8_t masks[2] = {mask, mask1};
+    return fusb303b_write(handle, FUSB303B_REG_MASK, masks, sizeof(masks));
 }
 
 esp_err_t fusb303b_set_role(fusb303b_handle_t handle,
@@ -208,17 +227,19 @@ esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
                               fusb303b_status_t *status,
                               bool clear_interrupts)
 {
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "status is NULL");
     memset(status, 0, sizeof(*status));
-    status->i2c_address = handle != NULL ? handle->device_address : 0;
+    status->i2c_address = handle->device_address;
+    /* The identity registers are read-only: report the values verified and
+     * cached by fusb303b_create() instead of re-reading them on every poll. */
+    status->device_id = handle->device_id;
+    status->device_type = handle->device_type;
 
-    uint8_t identity[2] = {0};
     uint8_t connection[3] = {0};
     uint8_t events[2] = {0};
-    ESP_RETURN_ON_ERROR(fusb303b_read(handle, FUSB303B_REG_DEVICE_ID,
-                                      identity, sizeof(identity)), TAG,
-                        "identity read failed");
     ESP_RETURN_ON_ERROR(fusb303b_read(handle, FUSB303B_REG_STATUS,
                                       connection, sizeof(connection)), TAG,
                         "connection status read failed");
@@ -226,8 +247,6 @@ esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
                                       events, sizeof(events)), TAG,
                         "interrupt status read failed");
 
-    status->device_id = identity[0];
-    status->device_type = identity[1];
     status->status = connection[0];
     status->status1 = connection[1];
     status->type = connection[2];
@@ -250,4 +269,16 @@ esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
                               sizeof(events));
     }
     return ESP_OK;
+}
+
+esp_err_t fusb303b_read_register(fusb303b_handle_t handle, uint8_t reg,
+                                 uint8_t *value)
+{
+    return fusb303b_read(handle, reg, value, 1);
+}
+
+esp_err_t fusb303b_write_register(fusb303b_handle_t handle, uint8_t reg,
+                                  uint8_t value)
+{
+    return fusb303b_write(handle, reg, &value, 1);
 }
