@@ -15,6 +15,7 @@
 
 #define RX8130CE_REG_SECONDS          0x10
 #define RX8130CE_REG_ALARM_MINUTE     0x17
+#define RX8130CE_REG_TIMER_COUNTER0   0x1A
 #define RX8130CE_REG_EXTENSION        0x1C
 #define RX8130CE_REG_FLAGS            0x1D
 #define RX8130CE_REG_CONTROL0         0x1E
@@ -22,8 +23,12 @@
 #define RX8130CE_REG_RAM              0x20
 #define RX8130CE_REG_DIGITAL_OFFSET   0x30
 #define RX8130CE_ALARM_AE             (1U << 7)
+#define RX8130CE_EXTENSION_TE         (1U << 4)
 #define RX8130CE_EXTENSION_WADA       (1U << 3)
+#define RX8130CE_EXTENSION_TSEL_MASK  0x07
 #define RX8130CE_CONTROL0_STOP        (1U << 6)
+#define RX8130CE_CONTROL0_UIE         (1U << 5)
+#define RX8130CE_CONTROL0_TIE         (1U << 4)
 #define RX8130CE_CONTROL0_AIE         (1U << 3)
 #define RX8130CE_CONTROL1_CHGEN       (1U << 5)
 #define RX8130CE_CONTROL1_INIEN       (1U << 4)
@@ -127,6 +132,22 @@ void rx8130ce_alarm_encode(const rx8130ce_alarm_t *alarm,
     *use_day_alarm = alarm->day_en;
 }
 
+bool rx8130ce_timer_is_valid(const rx8130ce_timer_t *timer)
+{
+    return timer != NULL &&
+           timer->source_clock <= RX8130CE_TIMER_SOURCE_1_3600HZ &&
+           timer->count >= 1;
+}
+
+void rx8130ce_timer_encode(const rx8130ce_timer_t *timer,
+                           uint8_t registers[2], uint8_t *tsel_bits)
+{
+    /* Timer Counter 0/1 hold the preset low byte first (appman 14.2.2). */
+    registers[0] = (uint8_t)(timer->count & 0xFF);
+    registers[1] = (uint8_t)(timer->count >> 8);
+    *tsel_bits = (uint8_t)timer->source_clock;
+}
+
 static esp_err_t decode_time(const uint8_t data[7], rx8130ce_time_t *time)
 {
     const uint8_t second = data[0] & 0x7F;
@@ -211,18 +232,26 @@ static void decode_status(uint8_t flags, rx8130ce_status_t *status)
     };
 }
 
-static esp_err_t rx8130ce_configure_primary_backup(rx8130ce_handle_t handle)
+static esp_err_t rx8130ce_configure_backup_supply(rx8130ce_handle_t handle,
+        bool charge_enable)
 {
+    /* Appman 14.7.2: INIEN=1 enables automatic supply switchover; CHGEN
+     * selects charging, which suits only rechargeable backup sources. */
     uint8_t control1 = 0;
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL1,
                                       &control1, 1), TAG,
                         "backup control read failed");
-    control1 &= ~RX8130CE_CONTROL1_CHGEN;
+    if (charge_enable) {
+        control1 |= RX8130CE_CONTROL1_CHGEN;
+    } else {
+        control1 &= ~RX8130CE_CONTROL1_CHGEN;
+    }
     control1 |= RX8130CE_CONTROL1_INIEN;
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL1, &control1, 1);
 }
 
-static esp_err_t rx8130ce_initialize_all_registers(rx8130ce_handle_t handle)
+static esp_err_t rx8130ce_initialize_all_registers(rx8130ce_handle_t handle,
+        bool charge_enable)
 {
     /* Known-safe epoch: 2000-01-01 00:00:00, Saturday. */
     static const uint8_t calendar[7] = {
@@ -235,7 +264,8 @@ static esp_err_t rx8130ce_initialize_all_registers(rx8130ce_handle_t handle)
     const uint8_t control0_stopped = RX8130CE_CONTROL0_STOP;
     const uint8_t control0_running = 0;
     const uint8_t flags = 0;
-    const uint8_t control1 = RX8130CE_CONTROL1_INIEN;
+    const uint8_t control1 = RX8130CE_CONTROL1_INIEN |
+                             (charge_enable ? RX8130CE_CONTROL1_CHGEN : 0);
     const uint8_t digital_offset = 0;
 
     ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_CONTROL0,
@@ -268,12 +298,17 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
                           const rx8130ce_config_t *config,
                           rx8130ce_handle_t *ret_handle)
 {
-    ESP_RETURN_ON_FALSE(bus != NULL && config != NULL && ret_handle != NULL,
+    ESP_RETURN_ON_FALSE(bus != NULL && ret_handle != NULL,
                         ESP_ERR_INVALID_ARG, TAG, "invalid create argument");
+    *ret_handle = NULL;
+
+    const rx8130ce_config_t default_config = RX8130CE_CONFIG_DEFAULT();
+    if (config == NULL) {
+        config = &default_config;
+    }
     ESP_RETURN_ON_FALSE(config->device_address <= 0x7F &&
                         config->scl_speed_hz > 0, ESP_ERR_INVALID_ARG, TAG,
                         "invalid I2C configuration");
-    *ret_handle = NULL;
 
     rx8130ce_handle_t handle = calloc(1, sizeof(*handle));
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_NO_MEM, TAG,
@@ -294,10 +329,12 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
             /* Appman 10.2: with VLF=1, initialize only after waiting out
              * the oscillator start time t_str (1.0 s max, appman 9.1). */
             vTaskDelay(pdMS_TO_TICKS(RX8130CE_OSCILLATOR_START_MS));
-            error = rx8130ce_initialize_all_registers(handle);
+            error = rx8130ce_initialize_all_registers(handle,
+                                                      config->backup_charge_enable);
         } else if (error == ESP_OK) {
-            /* Primary backup cell: enable switchover, never enable charging. */
-            error = rx8130ce_configure_primary_backup(handle);
+            /* Enable switchover; charge only rechargeable backup sources. */
+            error = rx8130ce_configure_backup_supply(handle,
+                                                     config->backup_charge_enable);
         }
     }
     if (error != ESP_OK) {
@@ -466,6 +503,110 @@ esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable)
         control0 |= RX8130CE_CONTROL0_AIE;
     } else {
         control0 &= ~RX8130CE_CONTROL0_AIE;
+    }
+    return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
+}
+
+esp_err_t rx8130ce_set_timer(rx8130ce_handle_t handle,
+                             const rx8130ce_timer_t *timer)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(rx8130ce_timer_is_valid(timer), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid timer");
+    uint8_t registers[2];
+    uint8_t tsel_bits = 0;
+    rx8130ce_timer_encode(timer, registers, &tsel_bits);
+
+    uint8_t extension = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_EXTENSION,
+                                      &extension, 1), TAG,
+                        "extension register read failed");
+    /* Appman 14.2.2 requires TE=0 before the preset value is written. */
+    const uint8_t stopped_extension = (extension & ~RX8130CE_EXTENSION_TE &
+                                       ~RX8130CE_EXTENSION_TSEL_MASK) |
+                                      tsel_bits;
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_EXTENSION,
+                                       &stopped_extension, 1), TAG,
+                        "timer stop failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_TIMER_COUNTER0,
+                                       registers, sizeof(registers)), TAG,
+                        "timer counter write failed");
+
+    /* Drop any timer event latched while the registers changed. */
+    uint8_t flags = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1),
+                        TAG, "flag read failed");
+    flags &= ~RX8130CE_FLAG_TF;
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_FLAGS, &flags, 1),
+                        TAG, "timer flag clear failed");
+
+    /* The TE 0->1 transition starts the countdown from the preset value. */
+    if (timer->enable) {
+        const uint8_t running_extension = stopped_extension |
+                                          RX8130CE_EXTENSION_TE;
+        ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_EXTENSION,
+                                           &running_extension, 1), TAG,
+                            "timer start failed");
+    }
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_get_timer(rx8130ce_handle_t handle,
+                             rx8130ce_timer_t *out_timer)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(out_timer != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "timer is NULL");
+    uint8_t data[2] = {0};
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_TIMER_COUNTER0,
+                                      data, sizeof(data)), TAG,
+                        "timer counter read failed");
+    uint8_t extension = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_EXTENSION,
+                                      &extension, 1), TAG,
+                        "extension register read failed");
+    const uint8_t tsel_bits = extension & RX8130CE_EXTENSION_TSEL_MASK;
+    ESP_RETURN_ON_FALSE(tsel_bits <= RX8130CE_TIMER_SOURCE_1_3600HZ,
+                        ESP_ERR_INVALID_RESPONSE, TAG,
+                        "invalid timer source data");
+    *out_timer = (rx8130ce_timer_t) {
+        .enable = (extension & RX8130CE_EXTENSION_TE) != 0,
+        .source_clock = (rx8130ce_timer_source_t)tsel_bits,
+        .count = (uint16_t)(data[0] | ((uint16_t)data[1] << 8)),
+    };
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_timer_irq_enable(rx8130ce_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    uint8_t control0 = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
+                                      &control0, 1), TAG,
+                        "control register read failed");
+    if (enable) {
+        control0 |= RX8130CE_CONTROL0_TIE;
+    } else {
+        control0 &= ~RX8130CE_CONTROL0_TIE;
+    }
+    return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
+}
+
+esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    uint8_t control0 = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
+                                      &control0, 1), TAG,
+                        "control register read failed");
+    if (enable) {
+        control0 |= RX8130CE_CONTROL0_UIE;
+    } else {
+        control0 &= ~RX8130CE_CONTROL0_UIE;
     }
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
 }

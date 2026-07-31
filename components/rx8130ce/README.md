@@ -11,20 +11,27 @@ The current API covers the functions needed by board bring-up:
 - validate, read, and set calendar time from 2000 through 2099;
 - program and read back the minute/hour/day/weekday alarm and switch its
   `/IRQ` output (`AIE`);
+- program, start, stop, and read back the fixed-cycle wake-up timer and
+  switch its `/IRQ` output (`TIE`);
+- switch the time update interrupt output (`UIE`);
 - decode retained voltage, reset, alarm, timer, and update flags;
 - read and clear the three interrupt flags that can assert `/IRQ`.
 
-Wake-up timer configuration, clock output, and digital offset are
-intentionally outside the current API. Those
-features need application-specific choices and should be added with tests when
-a board uses them.
+Clock output and digital offset are intentionally outside the current API.
+Those features need application-specific choices and should be added with
+tests when a board uses them.
 
-The board uses a primary backup cell. Device creation therefore always clears
-`CHGEN` and sets `INIEN`: automatic supply switchover is enabled, while backup
-battery charging is kept off. After `VLF=1`, the driver waits for oscillator
+The backup supply policy is a board-level choice made at device creation.
+The driver always sets `INIEN` (automatic supply switchover is enabled),
+while `CHGEN` follows `rx8130ce_config_t.backup_charge_enable`: keep the
+default `false` for a primary (non-rechargeable) backup cell so charging
+stays off, or set it to `true` when the board carries a rechargeable backup
+source (secondary cell or supercapacitor) that must be charged from VDD. The
+configured policy is applied after normal power-up and as part of the `VLF=1`
+full-register initialization. After `VLF=1`, the driver waits for oscillator
 startup and initializes all documented user registers. The calendar starts at
-the explicit recovery epoch 2000-01-01 00:00:00 (Saturday), and the application
-should set real time before relying on timestamps.
+the explicit recovery epoch 2000-01-01 00:00:00 (Saturday), and the
+application should set real time before relying on timestamps.
 
 ## Basic use
 
@@ -45,7 +52,8 @@ ESP_ERROR_CHECK(rx8130ce_delete(rtc));
 ```
 
 The fixed 7-bit address is `0x32`. `RX8130CE_CONFIG_DEFAULT()` selects a
-400 kHz I2C clock.
+400 kHz I2C clock and keeps backup charging off. Passing `NULL` as the config
+selects the same defaults.
 
 ## Setting time
 
@@ -73,6 +81,28 @@ the application manual, clears any latched `AF`, and restores the previous
 `AIE` state. `rx8130ce_alarm_irq_enable()` switches the `/IRQ` output without
 touching the compare settings, and the latched alarm flag is cleared through
 `rx8130ce_get_and_clear_interrupts()`.
+
+## Wake-up timer
+
+`rx8130ce_set_timer()` programs the fixed-cycle timer: the 16-bit down-counter
+preset (registers 1Ah-1Bh, 1-65535 counts) and the source clock selected by
+`rx8130ce_timer_source_t`, from 4096 Hz (244.14 us per count) down to
+1/3600 Hz (one hour per count). The driver holds `TE` cleared while the
+settings change, as the application manual requires, and clears any latched
+`TF`. With `timer.enable` set, the countdown then starts from the preset;
+with it cleared, the timer stays stopped and the counter registers hold the
+preset for readback. The first countdown can be up to one source-clock period
+shorter than configured.
+
+`rx8130ce_get_timer()` reads the settings back. While the timer runs, `count`
+is the live down-count and is not latched during the read, so read twice until
+two reads agree, or stop the timer first, for an exact value. Before the
+timer is first programmed, `count` can read back as `0`.
+
+`rx8130ce_timer_irq_enable()` switches the timer interrupt on the `/IRQ` pin
+(`TIE`) without touching the countdown, and `rx8130ce_update_irq_enable()`
+does the same for the time update interrupt (`UIE`). The latched timer flag
+is cleared through `rx8130ce_get_and_clear_interrupts()`.
 
 ## Status and interrupts
 

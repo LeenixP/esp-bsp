@@ -35,17 +35,26 @@ extern "C" {
 /** Opaque RX8130CE device handle. */
 typedef struct rx8130ce_device_t *rx8130ce_handle_t;
 
-/** I2C configuration used when creating an RX8130CE device. */
+/** I2C and backup supply configuration used when creating a device. */
 typedef struct {
     uint8_t device_address;
     uint32_t scl_speed_hz;
+    /**
+     * Backup battery charge policy applied on create (CHGEN bit, appman
+     * 14.7.2). Automatic supply switchover (INIEN) is always enabled.
+     * Keep false for a primary (non-rechargeable) backup cell; set true when
+     * the board carries a rechargeable backup source (secondary cell or
+     * supercapacitor) that must be charged from VDD.
+     */
+    bool backup_charge_enable;
 } rx8130ce_config_t;
 
-/** Default RX8130CE I2C configuration. */
+/** Default RX8130CE configuration: I2C defaults, backup charging off. */
 #define RX8130CE_CONFIG_DEFAULT()                 \
     {                                             \
         .device_address = RX8130CE_I2C_ADDRESS_DEFAULT, \
         .scl_speed_hz = RX8130CE_I2C_CLOCK_HZ,    \
+        .backup_charge_enable = false,            \
     }
 
 /** Calendar time represented by the RX8130CE. */
@@ -91,6 +100,34 @@ typedef struct {
     uint8_t weekday; /**< Weekday, 0 (Sunday) - 6 (Saturday). */
 } rx8130ce_alarm_t;
 
+/**
+ * Source clock of the fixed-cycle (wake-up) timer.
+ *
+ * The values match the TSEL2-TSEL0 encoding of the extension register, so
+ * they can be applied to the register image directly.
+ */
+typedef enum {
+    RX8130CE_TIMER_SOURCE_4096HZ = 0,   /**< 4096 Hz: 244.14 us per count. */
+    RX8130CE_TIMER_SOURCE_64HZ = 1,     /**< 64 Hz: 15.625 ms per count. */
+    RX8130CE_TIMER_SOURCE_1HZ = 2,      /**< 1 Hz: 1 s per count. */
+    RX8130CE_TIMER_SOURCE_1_60HZ = 3,   /**< 1/60 Hz: 1 min per count. */
+    RX8130CE_TIMER_SOURCE_1_3600HZ = 4, /**< 1/3600 Hz: 1 h per count. */
+} rx8130ce_timer_source_t;
+
+/**
+ * Fixed-cycle (wake-up) timer settings for the RX8130CE.
+ *
+ * The 16-bit counter counts down from count at the source clock rate and
+ * latches TF when it reaches zero; with TIE set the /IRQ pin pulses low for
+ * the auto reset time. The period ranges from 244.14 us (one count at
+ * 4096 Hz) to 65535 hours.
+ */
+typedef struct {
+    bool enable; /**< Start the countdown (TE=1) or stop the timer (TE=0). */
+    rx8130ce_timer_source_t source_clock; /**< Countdown rate (TSEL). */
+    uint16_t count; /**< Down-counter preset, 1-65535. */
+} rx8130ce_timer_t;
+
 /** Return true when a calendar value can be represented by the device. */
 bool rx8130ce_time_is_valid(const rx8130ce_time_t *time);
 
@@ -109,7 +146,28 @@ bool rx8130ce_alarm_is_valid(const rx8130ce_alarm_t *alarm);
 void rx8130ce_alarm_encode(const rx8130ce_alarm_t *alarm,
                            uint8_t registers[3], bool *use_day_alarm);
 
-/** Create a device on an existing I2C bus and verify register access. */
+/** Return true when a timer value can be represented by the device. */
+bool rx8130ce_timer_is_valid(const rx8130ce_timer_t *timer);
+
+/**
+ * Encode a timer preset into the raw 1Ah-1Bh register image.
+ *
+ * @param timer Timer value; must pass rx8130ce_timer_is_valid().
+ * @param registers Receives the Timer Counter 0/1 register values, low byte
+ *        first.
+ * @param tsel_bits Receives the raw TSEL2-TSEL0 bit field for the extension
+ *        register.
+ */
+void rx8130ce_timer_encode(const rx8130ce_timer_t *timer,
+                           uint8_t registers[2], uint8_t *tsel_bits);
+
+/**
+ * Create a device on an existing I2C bus and verify register access.
+ *
+ * A NULL config selects RX8130CE_CONFIG_DEFAULT(). The configured backup
+ * charge policy is applied after normal power-up and as part of the VLF=1
+ * full-register initialization.
+ */
 esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
                           const rx8130ce_config_t *config,
                           rx8130ce_handle_t *ret_handle);
@@ -147,6 +205,35 @@ esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
 
 /** Enable or disable the alarm interrupt output on the /IRQ pin (AIE). */
 esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable);
+
+/**
+ * Program the fixed-cycle (wake-up) timer.
+ *
+ * TE is held cleared while the preset and source clock change, as required by
+ * the application manual, and any latched timer flag is cleared. The
+ * countdown starts from the preset when timer.enable is true; false leaves
+ * the timer stopped. Use rx8130ce_timer_irq_enable() to route the timer event
+ * to the /IRQ pin.
+ */
+esp_err_t rx8130ce_set_timer(rx8130ce_handle_t handle,
+                             const rx8130ce_timer_t *timer);
+
+/**
+ * Read back the fixed-cycle timer settings.
+ *
+ * While the timer runs (enable is true), count reads back as the live
+ * down-count, which is not latched during the read; read twice until two
+ * reads agree, or stop the timer first, for an exact value. count may read
+ * back 0 before the timer is first programmed.
+ */
+esp_err_t rx8130ce_get_timer(rx8130ce_handle_t handle,
+                             rx8130ce_timer_t *out_timer);
+
+/** Enable or disable the timer interrupt output on the /IRQ pin (TIE). */
+esp_err_t rx8130ce_timer_irq_enable(rx8130ce_handle_t handle, bool enable);
+
+/** Enable or disable the time update interrupt on the /IRQ pin (UIE). */
+esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable);
 
 /** Read and clear the update, timer, and alarm interrupt flags. */
 esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,

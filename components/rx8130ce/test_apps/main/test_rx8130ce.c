@@ -10,6 +10,12 @@
 
 void app_main(void)
 {
+    /* The default config keeps backup charging off (primary cell policy). */
+    const rx8130ce_config_t default_config = RX8130CE_CONFIG_DEFAULT();
+    assert(default_config.device_address == RX8130CE_I2C_ADDRESS_DEFAULT &&
+           default_config.scl_speed_hz == RX8130CE_I2C_CLOCK_HZ &&
+           !default_config.backup_charge_enable);
+
     const rx8130ce_time_t leap_day = {
         .year = 2028,
         .month = 2,
@@ -112,4 +118,53 @@ void app_main(void)
     rx8130ce_alarm_encode(&weekly, registers, &use_day_alarm);
     assert(registers[0] == 0x80 && registers[1] == 0x18 &&
            registers[2] == 0x40 && !use_day_alarm);
+
+    /* Timer validation. */
+    const rx8130ce_timer_t one_hour = {
+        .enable = true,
+        .source_clock = RX8130CE_TIMER_SOURCE_1HZ,
+        .count = 3600,
+    };
+    assert(rx8130ce_timer_is_valid(&one_hour));
+
+    /* A stopped timer still validates; enable does not affect validity. */
+    rx8130ce_timer_t timer = one_hour;
+    timer.enable = false;
+    assert(rx8130ce_timer_is_valid(&timer));
+
+    /* The preset range is 1-65535. */
+    timer = one_hour;
+    timer.count = 0;
+    assert(!rx8130ce_timer_is_valid(&timer));
+
+    /* Only the five defined source clocks are accepted. */
+    timer = one_hour;
+    timer.source_clock = (rx8130ce_timer_source_t)5;
+    assert(!rx8130ce_timer_is_valid(&timer));
+    assert(!rx8130ce_timer_is_valid(NULL));
+
+    /* Timer encode: the preset goes low byte first, TSEL stays raw. */
+    uint8_t timer_registers[2];
+    uint8_t tsel_bits = 0;
+    rx8130ce_timer_encode(&one_hour, timer_registers, &tsel_bits);
+    assert(timer_registers[0] == 0x10 && timer_registers[1] == 0x0E &&
+           tsel_bits == RX8130CE_TIMER_SOURCE_1HZ);
+
+    const rx8130ce_timer_t min_fast = {
+        .enable = true,
+        .source_clock = RX8130CE_TIMER_SOURCE_4096HZ,
+        .count = 1,
+    };
+    rx8130ce_timer_encode(&min_fast, timer_registers, &tsel_bits);
+    assert(timer_registers[0] == 0x01 && timer_registers[1] == 0x00 &&
+           tsel_bits == RX8130CE_TIMER_SOURCE_4096HZ);
+
+    const rx8130ce_timer_t max_slow = {
+        .enable = false,
+        .source_clock = RX8130CE_TIMER_SOURCE_1_3600HZ,
+        .count = 65535,
+    };
+    rx8130ce_timer_encode(&max_slow, timer_registers, &tsel_bits);
+    assert(timer_registers[0] == 0xFF && timer_registers[1] == 0xFF &&
+           tsel_bits == RX8130CE_TIMER_SOURCE_1_3600HZ);
 }
