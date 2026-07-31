@@ -68,10 +68,46 @@ typedef struct {
     bool update;
     bool reset;
     bool backup_voltage_low;
+    bool backup_battery_full;
 } rx8130ce_status_t;
+
+/**
+ * Alarm compare settings for the RX8130CE.
+ *
+ * Each *_en flag selects whether the field participates in the alarm
+ * comparison; it maps to the active-low AE bit of the alarm register.
+ * Fields with a cleared *_en flag are ignored. The hardware compares either
+ * the day of month or the weekday, never both, so day_en and weekday_en are
+ * mutually exclusive.
+ */
+typedef struct {
+    bool minute_en;  /**< Compare the minute field. */
+    uint8_t minute;  /**< Minute, 0-59. */
+    bool hour_en;    /**< Compare the hour field. */
+    uint8_t hour;    /**< Hour, 0-23. */
+    bool day_en;     /**< Compare the day-of-month field. */
+    uint8_t day;     /**< Day of month, 1-31. */
+    bool weekday_en; /**< Compare the weekday field. */
+    uint8_t weekday; /**< Weekday, 0 (Sunday) - 6 (Saturday). */
+} rx8130ce_alarm_t;
 
 /** Return true when a calendar value can be represented by the device. */
 bool rx8130ce_time_is_valid(const rx8130ce_time_t *time);
+
+/** Return true when an alarm value can be represented by the device. */
+bool rx8130ce_alarm_is_valid(const rx8130ce_alarm_t *alarm);
+
+/**
+ * Encode an alarm into the raw 17h-19h register image.
+ *
+ * @param alarm Alarm value; must pass rx8130ce_alarm_is_valid().
+ * @param registers Receives the MIN/HOUR/WEEK-DAY alarm register values
+ *        with the active-low AE bits applied.
+ * @param use_day_alarm Receives the required WADA bit state: true selects
+ *        the day-of-month register layout, false the weekday layout.
+ */
+void rx8130ce_alarm_encode(const rx8130ce_alarm_t *alarm,
+                           uint8_t registers[3], bool *use_day_alarm);
 
 /** Create a device on an existing I2C bus and verify register access. */
 esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
@@ -93,6 +129,24 @@ esp_err_t rx8130ce_set_time(rx8130ce_handle_t handle,
 /** Read and decode the flag register without clearing it. */
 esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
                               rx8130ce_status_t *status);
+
+/**
+ * Program the alarm compare registers.
+ *
+ * AIE is held cleared while the registers change, as recommended by the
+ * application manual, and any latched alarm flag is cleared before the
+ * previous AIE state is restored. Use rx8130ce_alarm_irq_enable() to route
+ * the alarm event to the /IRQ pin.
+ */
+esp_err_t rx8130ce_set_alarm(rx8130ce_handle_t handle,
+                             const rx8130ce_alarm_t *alarm);
+
+/** Read back the alarm compare registers. */
+esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
+                             rx8130ce_alarm_t *out_alarm);
+
+/** Enable or disable the alarm interrupt output on the /IRQ pin (AIE). */
+esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable);
 
 /** Read and clear the update, timer, and alarm interrupt flags. */
 esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
