@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 
 #include "tg28_sw.h"
+#include "tg28_sw_priv.h"
 
 #define TG28_SW_REG_COMMON_STATUS0       0x00
 #define TG28_SW_REG_CHIP_ID              0x03
@@ -21,9 +22,16 @@
 #define TG28_SW_REG_MODE                 0x17
 #define TG28_SW_REG_MODULE_ENABLE        0x18
 #define TG28_SW_REG_POWER_ON_SOURCE      0x20
+#define TG28_SW_REG_ADC_CHANNEL_ENABLE   0x30
 #define TG28_SW_REG_VBAT_H               0x34
+#define TG28_SW_REG_TS_H                 0x36
+#define TG28_SW_REG_VBUS_H               0x38
+#define TG28_SW_REG_VSYS_H               0x3A
+#define TG28_SW_REG_TDIE_H               0x3C
+#define TG28_SW_REG_INT_ENABLE0          0x40
 #define TG28_SW_REG_INT_ENABLE1          0x41
-#define TG28_SW_REG_INT_STATUS1          0x48
+#define TG28_SW_REG_INT_ENABLE2          0x42
+#define TG28_SW_REG_INT_STATUS0          0x48
 #define TG28_SW_REG_TS_CONFIG            0x50
 #define TG28_SW_REG_CHARGE_CURRENT       0x62
 #define TG28_SW_REG_CHARGE_VOLTAGE       0x64
@@ -40,6 +48,7 @@
 #define TG28_SW_REG_ALDO4_VOLTAGE        0x95
 #define TG28_SW_REG_BLDO1_VOLTAGE        0x96
 #define TG28_SW_REG_BLDO2_VOLTAGE        0x97
+#define TG28_SW_REG_CPUSLDO_VOLTAGE      0x98
 #define TG28_SW_REG_DLDO1_VOLTAGE        0x99
 #define TG28_SW_REG_DLDO2_VOLTAGE        0x9A
 #define TG28_SW_REG_BATTERY_MODEL        0xA1
@@ -53,8 +62,11 @@
 #define TG28_SW_CHARGER_ENABLE_MASK      (1U << 1)
 #define TG28_SW_GAUGE_MCU_RESET_MASK     (1U << 2)
 #define TG28_SW_POWER_KEY_IRQ_MASK       0x0F
-#define TG28_SW_TS_EXTERNAL_FIXED_MASK   (1U << 4)
-#define TG28_SW_TS_CURRENT_ENABLE_MASK   (3U << 2)
+#define TG28_SW_TS_MODE_MASK             (1U << 4)
+#define TG28_SW_TS_CURRENT_SOURCE_MASK   (3U << 2)
+#define TG28_SW_TS_CURRENT_VALUE_MASK    0x03
+#define TG28_SW_TS_CONFIG_MASK           0x1F
+#define TG28_SW_ADC_VALUE_MASK           0x3F
 #define TG28_SW_CHARGE_CURRENT_MASK      0x1F
 #define TG28_SW_INPUT_CURRENT_LIMIT_MASK 0x07
 #define TG28_SW_CHARGE_VOLTAGE_MASK      0x07
@@ -120,7 +132,15 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
     [TG28_SW_BLDO2] = {"bldo2", TG28_SW_REG_BLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 5, 0x1F, 500, 3500, 100, 0, 0
     },
-    /* DLDO1/DLDO2 correspond to the vendor driver's LDO10/LDO11. */
+    [TG28_SW_CPUSLDO] = {"cpusldo", TG28_SW_REG_CPUSLDO_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
+        1U << 6, 0x1F, 500, 1400, 50, 0, 0
+    },
+    /* DLDO1/DLDO2 correspond to the vendor driver's LDO10/LDO11. The DLDO1
+     * datasheet section (REG99) is self-contradictory: the headline allows
+     * 0.5-3.4V in 100mV steps while its own enumeration stops at 3.3V
+     * (code 28) and marks codes 29-31 reserved; the vendor driver permits
+     * 500-3500mV. The 500-3500mV range here follows the vendor driver,
+     * pending confirmation on hardware. */
     [TG28_SW_DLDO1] = {"dldo1", TG28_SW_REG_DLDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 7, 0x1F, 500, 3500, 100, 0, 0
     },
@@ -129,9 +149,41 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
     },
 };
 
+/* ADC channel layout from datasheet 6.10 Table 6-7: the 14-bit result reads
+ * as high[5:0] then low[7:0]; VBAT/VBUS/VSYS convert at 1mV/LSB, TS at
+ * 0.5mV/LSB, and TDIE at 0.1mV/LSB. The enable bits live in REG30. */
+typedef struct {
+    uint8_t high_register;
+    uint8_t enable_mask;
+    uint8_t numerator;
+    uint8_t denominator;
+} adc_channel_config_t;
+
+static const adc_channel_config_t s_adc_channels[TG28_SW_ADC_CHANNEL_COUNT] = {
+    [TG28_SW_ADC_CHANNEL_VBAT] = {TG28_SW_REG_VBAT_H, 1U << 0, 1, 1},
+    [TG28_SW_ADC_CHANNEL_TS] = {TG28_SW_REG_TS_H, 1U << 1, 1, 2},
+    [TG28_SW_ADC_CHANNEL_VBUS] = {TG28_SW_REG_VBUS_H, 1U << 2, 1, 1},
+    [TG28_SW_ADC_CHANNEL_VSYS] = {TG28_SW_REG_VSYS_H, 1U << 3, 1, 1},
+    [TG28_SW_ADC_CHANNEL_TDIE] = {TG28_SW_REG_TDIE_H, 1U << 4, 1, 10},
+};
+
+static const uint8_t s_irq_enable_registers[TG28_SW_IRQ_BANK_COUNT] = {
+    TG28_SW_REG_INT_ENABLE0, TG28_SW_REG_INT_ENABLE1, TG28_SW_REG_INT_ENABLE2,
+};
+
 static bool regulator_is_valid(tg28_sw_regulator_t regulator)
 {
     return regulator >= 0 && regulator < TG28_SW_REGULATOR_COUNT;
+}
+
+static bool irq_bank_is_valid(tg28_sw_irq_bank_t bank)
+{
+    return bank >= 0 && bank < TG28_SW_IRQ_BANK_COUNT;
+}
+
+static bool adc_channel_is_valid(tg28_sw_adc_channel_t channel)
+{
+    return channel >= 0 && channel < TG28_SW_ADC_CHANNEL_COUNT;
 }
 
 static esp_err_t lock_device(tg28_sw_handle_t handle)
@@ -194,7 +246,8 @@ static esp_err_t set_brom_writer(tg28_sw_handle_t handle, bool enable)
 }
 
 /* The encode/decode helpers below are intentionally non-static so the
- * test app can exercise the pure conversion logic without I2C hardware. */
+ * test app can exercise the pure conversion logic without I2C hardware.
+ * Their declarations live in priv_include/tg28_sw_priv.h. */
 esp_err_t tg28_sw_encode_charge_current(uint16_t milliamps, uint8_t *code)
 {
     ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
@@ -366,6 +419,34 @@ uint16_t tg28_sw_decode_regulator_voltage(tg28_sw_regulator_t regulator,
     return decode_voltage(config, code & config->voltage_mask);
 }
 
+/* REG50 TS current-source values (uA) indexed by the 2-bit code. */
+static const uint16_t s_ts_currents[] = {20, 40, 50, 60};
+#define TG28_SW_TS_CURRENT_COUNT (sizeof(s_ts_currents) / sizeof(s_ts_currents[0]))
+
+esp_err_t tg28_sw_encode_ts_current(uint16_t microamps, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    for (uint8_t i = 0; i < TG28_SW_TS_CURRENT_COUNT; ++i) {
+        if (s_ts_currents[i] == microamps) {
+            *code = i;
+            return ESP_OK;
+        }
+    }
+    ESP_LOGE(TAG, "TS current is not representable");
+    return ESP_ERR_INVALID_ARG;
+}
+
+uint16_t tg28_sw_decode_adc_channel(tg28_sw_adc_channel_t channel,
+                                    uint8_t high, uint8_t low)
+{
+    if (!adc_channel_is_valid(channel)) {
+        return 0;
+    }
+    const uint16_t raw = ((uint16_t)(high & TG28_SW_ADC_VALUE_MASK) << 8) | low;
+    const adc_channel_config_t *config = &s_adc_channels[channel];
+    return (uint16_t)(((uint32_t)raw * config->numerator) / config->denominator);
+}
+
 esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
                          const tg28_sw_config_t *config,
                          tg28_sw_handle_t *ret_handle)
@@ -463,6 +544,19 @@ bool tg28_sw_is_supported_chip_id(uint8_t chip_id)
     return chip_id == 0x47 || chip_id == 0x4A;
 }
 
+/* The caller must already hold the device lock. */
+static esp_err_t read_adc_channel_locked(tg28_sw_handle_t handle,
+        tg28_sw_adc_channel_t channel, uint16_t *millivolts)
+{
+    const adc_channel_config_t *config = &s_adc_channels[channel];
+    uint8_t raw[2] = {0};
+    ESP_RETURN_ON_ERROR(read_registers(handle, config->high_register,
+                                       raw, sizeof(raw)),
+                        TAG, "ADC channel read failed");
+    *millivolts = tg28_sw_decode_adc_channel(channel, raw[0], raw[1]);
+    return ESP_OK;
+}
+
 esp_err_t tg28_sw_get_status(tg28_sw_handle_t handle, tg28_sw_status_t *status)
 {
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "status is NULL");
@@ -483,12 +577,10 @@ esp_err_t tg28_sw_get_status(tg28_sw_handle_t handle, tg28_sw_status_t *status)
         const uint8_t charge_state = raw[1] & TG28_SW_CHARGE_STATE_MASK;
         status->charging = charge_state >= 1 && charge_state <= 3;
         status->charge_done = charge_state == TG28_SW_CHARGE_STATE_DONE;
-        error = read_registers(handle, TG28_SW_REG_VBAT_H, raw, sizeof(raw));
+        error = read_adc_channel_locked(handle, TG28_SW_ADC_CHANNEL_VBAT,
+                                        &status->battery_mv);
     }
     if (error == ESP_OK) {
-        const uint16_t adc = ((uint16_t)(raw[0] & 0x3F) << 8) | raw[1];
-        /* The current vendor gauge driver exposes this 14-bit value in mV. */
-        status->battery_mv = adc;
         error = read_registers(handle, TG28_SW_REG_SOC,
                                &status->battery_percent,
                                sizeof(status->battery_percent));
@@ -511,25 +603,111 @@ esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source)
     return error;
 }
 
+esp_err_t tg28_sw_set_irq_enable(tg28_sw_handle_t handle,
+                                 tg28_sw_irq_bank_t bank, uint8_t mask)
+{
+    ESP_RETURN_ON_FALSE(irq_bank_is_valid(bank), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid IRQ bank");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = write_registers(handle, s_irq_enable_registers[bank],
+                                            &mask, sizeof(mask));
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_irq_enable(tg28_sw_handle_t handle,
+                                 tg28_sw_irq_bank_t bank, uint8_t *mask)
+{
+    ESP_RETURN_ON_FALSE(irq_bank_is_valid(bank) && mask != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid IRQ bank request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = read_registers(handle, s_irq_enable_registers[bank],
+                                           mask, sizeof(*mask));
+    unlock_device(handle);
+    return error;
+}
+
 esp_err_t tg28_sw_configure_power_key_interrupts(tg28_sw_handle_t handle,
         uint8_t enabled_mask)
 {
     ESP_RETURN_ON_FALSE((enabled_mask & ~TG28_SW_POWER_KEY_IRQ_MASK) == 0,
                         ESP_ERR_INVALID_ARG, TAG, "invalid power-key IRQ mask");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
-    const esp_err_t error = update_bits(handle, TG28_SW_REG_INT_ENABLE1,
-                                        TG28_SW_POWER_KEY_IRQ_MASK, enabled_mask);
+    uint8_t bank_mask = 0;
+    esp_err_t error = read_registers(handle,
+                                     s_irq_enable_registers[TG28_SW_IRQ_BANK1],
+                                     &bank_mask, sizeof(bank_mask));
+    if (error == ESP_OK) {
+        bank_mask = (bank_mask & ~TG28_SW_POWER_KEY_IRQ_MASK) |
+                    (enabled_mask & TG28_SW_POWER_KEY_IRQ_MASK);
+        error = write_registers(handle,
+                                s_irq_enable_registers[TG28_SW_IRQ_BANK1],
+                                &bank_mask, sizeof(bank_mask));
+    }
     unlock_device(handle);
     return error;
 }
 
-esp_err_t tg28_sw_configure_external_fixed_ts(tg28_sw_handle_t handle)
+esp_err_t tg28_sw_set_ts_config(tg28_sw_handle_t handle,
+                                tg28_sw_ts_mode_t mode,
+                                tg28_sw_ts_current_source_t current_source,
+                                uint16_t current_ua)
 {
+    ESP_RETURN_ON_FALSE(mode == TG28_SW_TS_MODE_BATTERY_NTC ||
+                        mode == TG28_SW_TS_MODE_EXTERNAL_FIXED,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid TS mode");
+    ESP_RETURN_ON_FALSE(current_source >= TG28_SW_TS_CURRENT_SOURCE_OFF &&
+                        current_source <= TG28_SW_TS_CURRENT_SOURCE_ALWAYS_ON,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid TS current source");
+    uint8_t current_code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_ts_current(current_ua, &current_code),
+                        TAG, "unsupported TS current");
+    const uint8_t value = ((uint8_t)mode << 4) |
+                          ((uint8_t)current_source << 2) | current_code;
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
-    const uint8_t mask = TG28_SW_TS_EXTERNAL_FIXED_MASK |
-                         TG28_SW_TS_CURRENT_ENABLE_MASK;
-    const esp_err_t error = update_bits(handle, TG28_SW_REG_TS_CONFIG, mask,
-                                        TG28_SW_TS_EXTERNAL_FIXED_MASK);
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_TS_CONFIG,
+                                        TG28_SW_TS_CONFIG_MASK, value);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_read_adc_channel(tg28_sw_handle_t handle,
+                                   tg28_sw_adc_channel_t channel,
+                                   uint16_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(adc_channel_is_valid(channel) && millivolts != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid ADC channel request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = read_adc_channel_locked(handle, channel, millivolts);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_adc_channel_enable(tg28_sw_handle_t handle,
+        tg28_sw_adc_channel_t channel, bool enable)
+{
+    ESP_RETURN_ON_FALSE(adc_channel_is_valid(channel), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid ADC channel");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const uint8_t mask = s_adc_channels[channel].enable_mask;
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_ADC_CHANNEL_ENABLE,
+                                        mask, enable ? mask : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_adc_channel_enable(tg28_sw_handle_t handle,
+        tg28_sw_adc_channel_t channel, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(adc_channel_is_valid(channel) && enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid ADC channel request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_ADC_CHANNEL_ENABLE,
+                                           &value, sizeof(value));
+    if (error == ESP_OK) {
+        *enabled = (value & s_adc_channels[channel].enable_mask) != 0;
+    }
     unlock_device(handle);
     return error;
 }
@@ -823,9 +1001,9 @@ esp_err_t tg28_sw_get_and_clear_interrupts(tg28_sw_handle_t handle,
 {
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "status is NULL");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
-    esp_err_t error = read_registers(handle, TG28_SW_REG_INT_STATUS1, status, 3);
+    esp_err_t error = read_registers(handle, TG28_SW_REG_INT_STATUS0, status, 3);
     if (error == ESP_OK) {
-        error = write_registers(handle, TG28_SW_REG_INT_STATUS1, status, 3);
+        error = write_registers(handle, TG28_SW_REG_INT_STATUS0, status, 3);
     }
     unlock_device(handle);
     return error;

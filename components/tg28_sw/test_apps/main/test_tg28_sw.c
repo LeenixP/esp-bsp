@@ -8,21 +8,7 @@
 #include <string.h>
 
 #include "tg28_sw.h"
-
-/* Pure conversion helpers from tg28_sw.c, exercised here without I2C
- * hardware. They are deliberately not part of the public header. */
-esp_err_t tg28_sw_encode_charge_current(uint16_t milliamps, uint8_t *code);
-uint16_t tg28_sw_decode_charge_current(uint8_t code);
-esp_err_t tg28_sw_encode_input_current_limit(uint16_t milliamps, uint8_t *code);
-uint16_t tg28_sw_decode_input_current_limit(uint8_t code);
-esp_err_t tg28_sw_encode_charge_voltage(uint16_t millivolts, uint8_t *code);
-uint16_t tg28_sw_decode_charge_voltage(uint8_t code);
-esp_err_t tg28_sw_encode_vindpm(uint16_t millivolts, uint8_t *code);
-uint16_t tg28_sw_decode_vindpm(uint8_t code);
-esp_err_t tg28_sw_encode_regulator_voltage(tg28_sw_regulator_t regulator,
-        uint16_t millivolts, uint8_t *code);
-uint16_t tg28_sw_decode_regulator_voltage(tg28_sw_regulator_t regulator,
-        uint8_t code);
+#include "tg28_sw_priv.h"
 
 static void test_chip_id_and_names(void)
 {
@@ -30,10 +16,11 @@ static void test_chip_id_and_names(void)
     assert(tg28_sw_is_supported_chip_id(0x4A));
     assert(!tg28_sw_is_supported_chip_id(0x00));
 
-    assert(TG28_SW_REGULATOR_COUNT == 12);
+    assert(TG28_SW_REGULATOR_COUNT == 13);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_DCDC1), "dcdc1") == 0);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_ALDO4), "aldo4") == 0);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_BLDO2), "bldo2") == 0);
+    assert(strcmp(tg28_sw_regulator_name(TG28_SW_CPUSLDO), "cpusldo") == 0);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_DLDO1), "dldo1") == 0);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_DLDO2), "dldo2") == 0);
     assert(strcmp(tg28_sw_regulator_name(TG28_SW_REGULATOR_COUNT), "invalid") == 0);
@@ -138,12 +125,59 @@ static void test_regulator_voltage_coding(void)
            ESP_ERR_INVALID_ARG);
     assert(tg28_sw_decode_regulator_voltage(TG28_SW_DLDO2, 18) == 1400);
 
+    /* CPUSLDO: 500-1400mV in 50mV steps (REG98), same coding as DLDO2. */
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_CPUSLDO, 500, &code) == ESP_OK &&
+           code == 0);
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_CPUSLDO, 1400, &code) == ESP_OK &&
+           code == 18);
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_CPUSLDO, 1425, &code) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_CPUSLDO, 1450, &code) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_decode_regulator_voltage(TG28_SW_CPUSLDO, 18) == 1400);
+    assert(tg28_sw_decode_regulator_voltage(TG28_SW_CPUSLDO, 31) == 1400);
+
     /* Existing rails keep their coding: BLDO1 full range, DCDC2 two segments. */
     assert(tg28_sw_encode_regulator_voltage(TG28_SW_BLDO1, 3500, &code) == ESP_OK &&
            code == 30);
     assert(tg28_sw_encode_regulator_voltage(TG28_SW_DCDC2, 1200, &code) == ESP_OK);
     assert(tg28_sw_decode_regulator_voltage(TG28_SW_DCDC2,
                                             70) == 1200);
+}
+
+static void test_ts_current_coding(void)
+{
+    static const uint16_t levels[] = {20, 40, 50, 60};
+    for (uint8_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
+        uint8_t code = 0;
+        assert(tg28_sw_encode_ts_current(levels[i], &code) == ESP_OK);
+        assert(code == i);
+    }
+
+    uint8_t code = 0;
+    assert(tg28_sw_encode_ts_current(0, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_ts_current(30, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_ts_current(80, &code) == ESP_ERR_INVALID_ARG);
+}
+
+static void test_adc_channel_coding(void)
+{
+    /* VBAT/VBUS/VSYS convert at 1mV/LSB; the high byte keeps only 6 bits. */
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_VBAT, 0x00, 0x00) == 0);
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_VBAT, 0x0E, 0x96) == 3734);
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_VBUS, 0x13, 0x88) == 5000);
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_VSYS, 0x0E, 0x96) == 3734);
+    /* REG34[7:6] carry ch_dbg_en and must be masked out of the value. */
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_VBAT, 0xCE, 0x96) == 3734);
+
+    /* TS converts at 0.5mV/LSB: 0x3E8 (1000) codes equal the 0.500V table
+     * entry for a 10kOhm NTC at 25C (datasheet Table 6-5). */
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_TS, 0x03, 0xE8) == 500);
+
+    /* TDIE converts at 0.1mV/LSB, truncating sub-millivolt resolution. */
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_TDIE, 0x03, 0xE8) == 100);
+
+    assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_COUNT, 0x0E, 0x96) == 0);
 }
 
 void app_main(void)
@@ -154,4 +188,6 @@ void app_main(void)
     test_charge_voltage_coding();
     test_vindpm_coding();
     test_regulator_voltage_coding();
+    test_ts_current_coding();
+    test_adc_channel_coding();
 }

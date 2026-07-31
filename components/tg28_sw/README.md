@@ -5,15 +5,20 @@ TG28 power-management IC. It owns only the I2C device handle; the application
 or board support package remains responsible for the I2C bus and for deciding
 which regulator powers each peripheral.
 
-The implemented interface covers the functions needed by Candis-S31:
+The implemented interface covers the switch-charger variant's charger,
+fuel-gauge, regulator, ADC, and interrupt control:
 
 - chip identification;
 - VBUS, battery, charge-state, voltage, and state-of-charge readings;
 - raw power-on source and explicit power-key interrupt configuration;
-- exact REG62 charge-current control and external fixed-TS selection;
+- exact REG62 charge-current control and REG50 TS pin configuration
+  (battery NTC or external fixed input, with current-source control);
+- per-bank IRQ enable control (REG40-REG42);
+- 14-bit ADC channel reads for VBAT, TS, VBUS, VSYS, and TDIE with
+  REG30 channel-enable management;
 - verified per-boot download of a battery-specific REGA1 fuel-gauge model;
-- DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, and DLDO1-DLDO2 voltage and enable
-  control (the switch-charger variant has no DCDC5 rail);
+- DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, CPUSLDO, and DLDO1-DLDO2 voltage
+  and enable control (the switch-charger variant has no DCDC5 rail);
 - discrete REG16 input-current-limit and REG64 charge-voltage control;
 - exact REG15 VINDPM threshold control;
 - interrupt status read and write-one-to-clear handling.
