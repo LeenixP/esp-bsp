@@ -46,9 +46,10 @@ RX8130CE RTC and FUSB303B Type-C support are implemented locally because no
 matching registry components are currently used by this board.
 
 The board uses the switch-charger variant of the TG28 (I2C address 0x34 on
-the low-power bus). It exposes twelve rails through `bsp_pmic_regulator_*`:
-DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, and DLDO1-DLDO2. The linear-charger
-variant's DCDC5 does not exist here. DLDO1 is strapped in SWITCH mode and
+the low-power bus). It exposes thirteen rails through `bsp_pmic_regulator_*`:
+DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, CPUSLDO, and DLDO1-DLDO2. The
+linear-charger variant's DCDC5 does not exist here. CPUSLDO is unconnected on
+this board and stays off. DLDO1 is strapped in SWITCH mode and
 passes DCDC1 (3.3V) through to the RGB LED; DLDO2 is an unconnected spare.
 Charger control covers the constant-current limit (0-200mA in 25mA steps,
 then 300-1500mA in 100mA steps), the discrete input current limit

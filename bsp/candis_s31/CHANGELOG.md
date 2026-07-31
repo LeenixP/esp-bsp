@@ -1,5 +1,17 @@
 # ChangeLog
 
+## v1.2.0 - 2026-07-31
+
+### Features
+
+* PMIC: add the `BSP_PMIC_CPUSLDO` rail enum, following the tg28_sw 0.3.0 rail table (unconnected on this board, kept off); rail count is now thirteen
+* RTC: pass `backup_charge_enable = false` explicitly at driver creation (rx8130ce 0.3.0 config field); Candis-S31 uses a primary backup cell
+* Power: select the board's TS input through the generalized `tg28_sw_set_ts_config` API (external fixed TS, current source off)
+
+### Notes
+
+* Driver dependencies raised to tg28_sw `^0.3.0`, rx8130ce `^0.3.0`, fusb303b `^0.2.0`
+
 ## v1.1.0 - 2026-07-31
 
 ### Features

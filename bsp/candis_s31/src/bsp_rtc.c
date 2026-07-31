@@ -48,7 +48,13 @@ esp_err_t bsp_rtc_init(void)
     }
     i2c_master_bus_handle_t bus = bsp_lp_i2c_get_handle();
     ESP_RETURN_ON_FALSE(bus != NULL, ESP_FAIL, TAG, "low-power I2C init failed");
-    const rx8130ce_config_t config = RX8130CE_CONFIG_DEFAULT();
+    /* Candis-S31 carries a primary (non-rechargeable) backup cell on VBAT:
+     * enable automatic supply switchover but never charge the cell. */
+    const rx8130ce_config_t config = {
+        .device_address = RX8130CE_I2C_ADDRESS_DEFAULT,
+        .scl_speed_hz = RX8130CE_I2C_CLOCK_HZ,
+        .backup_charge_enable = false,
+    };
     return rx8130ce_create(bus, &config, &s_rtc);
 }
 

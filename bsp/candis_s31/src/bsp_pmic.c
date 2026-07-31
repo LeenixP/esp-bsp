@@ -48,7 +48,12 @@ esp_err_t bsp_pmic_init(void)
                                                        TG28_SW_POWER_KEY_IRQ_ALL);
     }
     if (error == ESP_OK) {
-        error = tg28_sw_configure_external_fixed_ts(s_pmic);
+        /* Board-level choice: the Candis-S31 battery has no NTC resistor,
+         * so the TS pin is the external fixed input and its current source
+         * stays off. The 50uA value is the power-on default and is
+         * irrelevant while the current source is off. */
+        error = tg28_sw_set_ts_config(s_pmic, TG28_SW_TS_MODE_EXTERNAL_FIXED,
+                                      TG28_SW_TS_CURRENT_SOURCE_OFF, 50);
     }
     if (error != ESP_OK && s_pmic != NULL) {
         tg28_sw_delete(s_pmic);

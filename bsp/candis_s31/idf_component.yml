@@ -1,4 +1,4 @@
-version: "1.1.0"
+version: "1.2.0"
 description: Board Support Package for Candis-S31
 url: https://github.com/espressif/esp-bsp/tree/master/bsp/candis_s31
 
@@ -12,17 +12,17 @@ dependencies:
   idf: ">=6.1"
 
   espressif/fusb303b:
-    version: "^0.1.0"
+    version: "^0.2.0"
     public: false
     override_path: "../../components/fusb303b"
 
   espressif/rx8130ce:
-    version: "^0.2.0"
+    version: "^0.3.0"
     public: true
     override_path: "../../components/rx8130ce"
 
   espressif/tg28_sw:
-    version: "^0.2.0"
+    version: "^0.3.0"
     public: false
     override_path: "../../components/tg28_sw"
 
