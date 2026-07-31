@@ -40,13 +40,14 @@ typedef enum {
     TG28_SW_DCDC2,
     TG28_SW_DCDC3,
     TG28_SW_DCDC4,
-    TG28_SW_DCDC5,
     TG28_SW_ALDO1,
     TG28_SW_ALDO2,
     TG28_SW_ALDO3,
     TG28_SW_ALDO4,
     TG28_SW_BLDO1,
     TG28_SW_BLDO2,
+    TG28_SW_DLDO1,
+    TG28_SW_DLDO2,
     TG28_SW_REGULATOR_COUNT,
 } tg28_sw_regulator_t;
 
@@ -119,6 +120,40 @@ esp_err_t tg28_sw_set_charge_current(tg28_sw_handle_t handle, uint16_t milliamps
 
 /** Read the REG62 constant-current charge limit. */
 esp_err_t tg28_sw_get_charge_current(tg28_sw_handle_t handle, uint16_t *milliamps);
+
+/**
+ * Set the REG16 input current limit. Only the discrete vendor levels
+ * 100/500/900/1000/1500/2000 mA are accepted; anything else returns
+ * ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_input_current_limit(tg28_sw_handle_t handle,
+        uint16_t milliamps);
+
+/** Read the REG16 input current limit. */
+esp_err_t tg28_sw_get_input_current_limit(tg28_sw_handle_t handle,
+        uint16_t *milliamps);
+
+/**
+ * Set the REG64 charge termination voltage. Only the discrete vendor levels
+ * 3900/4000/4100/4200/4350/4400 mV are accepted; anything else returns
+ * ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_charge_voltage(tg28_sw_handle_t handle,
+                                     uint16_t millivolts);
+
+/** Read the REG64 charge termination voltage. */
+esp_err_t tg28_sw_get_charge_voltage(tg28_sw_handle_t handle,
+                                     uint16_t *millivolts);
+
+/**
+ * Set the REG15 VINDPM threshold to an exactly representable value
+ * (3880 + 80 * code, codes 2-10, i.e. 4040-4680 mV in 80 mV steps);
+ * anything else returns ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_vindpm(tg28_sw_handle_t handle, uint16_t millivolts);
+
+/** Read the REG15 VINDPM threshold. */
+esp_err_t tg28_sw_get_vindpm(tg28_sw_handle_t handle, uint16_t *millivolts);
 
 /**
  * Download and verify a battery-specific fuel-gauge model through REGA1.

@@ -16,6 +16,8 @@
 
 #define TG28_SW_REG_COMMON_STATUS0       0x00
 #define TG28_SW_REG_CHIP_ID              0x03
+#define TG28_SW_REG_VINDPM               0x15
+#define TG28_SW_REG_INPUT_CURRENT_LIMIT  0x16
 #define TG28_SW_REG_MODE                 0x17
 #define TG28_SW_REG_MODULE_ENABLE        0x18
 #define TG28_SW_REG_POWER_ON_SOURCE      0x20
@@ -24,19 +26,22 @@
 #define TG28_SW_REG_INT_STATUS1          0x48
 #define TG28_SW_REG_TS_CONFIG            0x50
 #define TG28_SW_REG_CHARGE_CURRENT       0x62
+#define TG28_SW_REG_CHARGE_VOLTAGE       0x64
 #define TG28_SW_REG_DCDC_ENABLE          0x80
 #define TG28_SW_REG_DCDC1_VOLTAGE        0x82
 #define TG28_SW_REG_DCDC2_VOLTAGE        0x83
 #define TG28_SW_REG_DCDC3_VOLTAGE        0x84
 #define TG28_SW_REG_DCDC4_VOLTAGE        0x85
-#define TG28_SW_REG_DCDC5_VOLTAGE        0x86
 #define TG28_SW_REG_LDO_ENABLE0          0x90
+#define TG28_SW_REG_LDO_ENABLE1          0x91
 #define TG28_SW_REG_ALDO1_VOLTAGE        0x92
 #define TG28_SW_REG_ALDO2_VOLTAGE        0x93
 #define TG28_SW_REG_ALDO3_VOLTAGE        0x94
 #define TG28_SW_REG_ALDO4_VOLTAGE        0x95
 #define TG28_SW_REG_BLDO1_VOLTAGE        0x96
 #define TG28_SW_REG_BLDO2_VOLTAGE        0x97
+#define TG28_SW_REG_DLDO1_VOLTAGE        0x99
+#define TG28_SW_REG_DLDO2_VOLTAGE        0x9A
 #define TG28_SW_REG_BATTERY_MODEL        0xA1
 #define TG28_SW_REG_FUEL_GAUGE_CONTROL   0xA2
 #define TG28_SW_REG_SOC                  0xA4
@@ -51,6 +56,9 @@
 #define TG28_SW_TS_EXTERNAL_FIXED_MASK   (1U << 4)
 #define TG28_SW_TS_CURRENT_ENABLE_MASK   (3U << 2)
 #define TG28_SW_CHARGE_CURRENT_MASK      0x1F
+#define TG28_SW_INPUT_CURRENT_LIMIT_MASK 0x07
+#define TG28_SW_CHARGE_VOLTAGE_MASK      0x07
+#define TG28_SW_VINDPM_MASK              0x1F
 #define TG28_SW_BROM_UPDATE_MARK_MASK    (1U << 4)
 #define TG28_SW_BROM_WRITER_ENABLE_MASK  (1U << 0)
 #define TG28_SW_REGISTER_TIMEOUT_MS      100
@@ -90,9 +98,6 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
     [TG28_SW_DCDC4] = {"dcdc4", TG28_SW_REG_DCDC4_VOLTAGE, TG28_SW_REG_DCDC_ENABLE,
         1U << 3, 0x7F, 500, 1840, 10, 1200, 20
     },
-    [TG28_SW_DCDC5] = {"dcdc5", TG28_SW_REG_DCDC5_VOLTAGE, TG28_SW_REG_DCDC_ENABLE,
-        1U << 4, 0x1F, 1400, 3700, 100, 0, 0
-    },
     [TG28_SW_ALDO1] = {"aldo1", TG28_SW_REG_ALDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 0, 0x1F, 500, 3500, 100, 0, 0
     },
@@ -102,14 +107,25 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
     [TG28_SW_ALDO3] = {"aldo3", TG28_SW_REG_ALDO3_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 2, 0x1F, 500, 3500, 100, 0, 0
     },
+    /* The vendor linear-range table for ALDO4 (second segment 3400/200mV)
+     * makes 3500mV unreachable. The single 500-3500mV / 100mV range used
+     * here matches the vendor decode for every code (code 30 = 3500mV,
+     * code 31 clamps to 3500mV) and keeps the full range settable. */
     [TG28_SW_ALDO4] = {"aldo4", TG28_SW_REG_ALDO4_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
-        1U << 3, 0x1F, 500, 3500, 100, 3400, 200
+        1U << 3, 0x1F, 500, 3500, 100, 0, 0
     },
     [TG28_SW_BLDO1] = {"bldo1", TG28_SW_REG_BLDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 4, 0x1F, 500, 3500, 100, 0, 0
     },
     [TG28_SW_BLDO2] = {"bldo2", TG28_SW_REG_BLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 5, 0x1F, 500, 3500, 100, 0, 0
+    },
+    /* DLDO1/DLDO2 correspond to the vendor driver's LDO10/LDO11. */
+    [TG28_SW_DLDO1] = {"dldo1", TG28_SW_REG_DLDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
+        1U << 7, 0x1F, 500, 3500, 100, 0, 0
+    },
+    [TG28_SW_DLDO2] = {"dldo2", TG28_SW_REG_DLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE1,
+        1U << 0, 0x1F, 500, 1400, 50, 0, 0
     },
 };
 
@@ -177,7 +193,9 @@ static esp_err_t set_brom_writer(tg28_sw_handle_t handle, bool enable)
                        enable ? TG28_SW_BROM_WRITER_ENABLE_MASK : 0);
 }
 
-static esp_err_t encode_charge_current(uint16_t milliamps, uint8_t *code)
+/* The encode/decode helpers below are intentionally non-static so the
+ * test app can exercise the pure conversion logic without I2C hardware. */
+esp_err_t tg28_sw_encode_charge_current(uint16_t milliamps, uint8_t *code)
 {
     ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
     uint16_t value = 0;
@@ -196,11 +214,91 @@ static esp_err_t encode_charge_current(uint16_t milliamps, uint8_t *code)
     return ESP_OK;
 }
 
-static uint16_t decode_charge_current(uint8_t code)
+uint16_t tg28_sw_decode_charge_current(uint8_t code)
 {
     code &= TG28_SW_CHARGE_CURRENT_MASK;
     return code <= 8 ? (uint16_t)code * 25 :
            (uint16_t)(200 + (code - 8) * 100);
+}
+
+/* REG16 input current limit levels (mA) indexed by the 3-bit code. */
+static const uint16_t s_input_current_limits[] = {100, 500, 900, 1000, 1500, 2000};
+#define TG28_SW_INPUT_CURRENT_LIMIT_COUNT \
+    (sizeof(s_input_current_limits) / sizeof(s_input_current_limits[0]))
+
+esp_err_t tg28_sw_encode_input_current_limit(uint16_t milliamps, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    for (uint8_t i = 0; i < TG28_SW_INPUT_CURRENT_LIMIT_COUNT; ++i) {
+        if (s_input_current_limits[i] == milliamps) {
+            *code = i;
+            return ESP_OK;
+        }
+    }
+    ESP_LOGE(TAG, "input current limit is not representable");
+    return ESP_ERR_INVALID_ARG;
+}
+
+uint16_t tg28_sw_decode_input_current_limit(uint8_t code)
+{
+    code &= TG28_SW_INPUT_CURRENT_LIMIT_MASK;
+    return code < TG28_SW_INPUT_CURRENT_LIMIT_COUNT ?
+           s_input_current_limits[code] : 0;
+}
+
+/* REG64 charge termination voltage levels (mV) indexed by the 3-bit code. */
+static const uint16_t s_charge_voltages[] = {3900, 4000, 4100, 4200, 4350, 4400};
+#define TG28_SW_CHARGE_VOLTAGE_COUNT \
+    (sizeof(s_charge_voltages) / sizeof(s_charge_voltages[0]))
+
+esp_err_t tg28_sw_encode_charge_voltage(uint16_t millivolts, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    for (uint8_t i = 0; i < TG28_SW_CHARGE_VOLTAGE_COUNT; ++i) {
+        if (s_charge_voltages[i] == millivolts) {
+            *code = i;
+            return ESP_OK;
+        }
+    }
+    ESP_LOGE(TAG, "charge voltage is not representable");
+    return ESP_ERR_INVALID_ARG;
+}
+
+uint16_t tg28_sw_decode_charge_voltage(uint8_t code)
+{
+    code &= TG28_SW_CHARGE_VOLTAGE_MASK;
+    return code < TG28_SW_CHARGE_VOLTAGE_COUNT ? s_charge_voltages[code] : 0;
+}
+
+/* REG15 VINDPM: millivolts = 3880 + 80 * code. The vendor driver accepts
+ * 4000-4700mV, which lands on codes 2-10 (4040-4680mV). */
+#define TG28_SW_VINDPM_BASE_MV    3880
+#define TG28_SW_VINDPM_STEP_MV    80
+#define TG28_SW_VINDPM_MIN_CODE   2
+#define TG28_SW_VINDPM_MAX_CODE   10
+
+esp_err_t tg28_sw_encode_vindpm(uint16_t millivolts, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    ESP_RETURN_ON_FALSE(millivolts >= TG28_SW_VINDPM_BASE_MV &&
+                        (millivolts - TG28_SW_VINDPM_BASE_MV) %
+                        TG28_SW_VINDPM_STEP_MV == 0,
+                        ESP_ERR_INVALID_ARG, TAG,
+                        "VINDPM voltage is not representable");
+    const uint16_t value =
+        (millivolts - TG28_SW_VINDPM_BASE_MV) / TG28_SW_VINDPM_STEP_MV;
+    ESP_RETURN_ON_FALSE(value >= TG28_SW_VINDPM_MIN_CODE &&
+                        value <= TG28_SW_VINDPM_MAX_CODE,
+                        ESP_ERR_INVALID_ARG, TAG,
+                        "VINDPM voltage is out of range");
+    *code = (uint8_t)value;
+    return ESP_OK;
+}
+
+uint16_t tg28_sw_decode_vindpm(uint8_t code)
+{
+    code &= TG28_SW_VINDPM_MASK;
+    return TG28_SW_VINDPM_BASE_MV + (uint16_t)code * TG28_SW_VINDPM_STEP_MV;
 }
 
 static esp_err_t encode_voltage(const regulator_config_t *config,
@@ -248,6 +346,24 @@ static uint16_t decode_voltage(const regulator_config_t *config, uint8_t code)
     }
     millivolts = config->minimum_mv + code * config->step_mv;
     return millivolts < config->maximum_mv ? millivolts : config->maximum_mv;
+}
+
+esp_err_t tg28_sw_encode_regulator_voltage(tg28_sw_regulator_t regulator,
+        uint16_t millivolts, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(regulator_is_valid(regulator) && code != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid voltage encode request");
+    return encode_voltage(&s_regulators[regulator], millivolts, code);
+}
+
+uint16_t tg28_sw_decode_regulator_voltage(tg28_sw_regulator_t regulator,
+        uint8_t code)
+{
+    if (!regulator_is_valid(regulator)) {
+        return 0;
+    }
+    const regulator_config_t *config = &s_regulators[regulator];
+    return decode_voltage(config, code & config->voltage_mask);
 }
 
 esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
@@ -421,7 +537,7 @@ esp_err_t tg28_sw_configure_external_fixed_ts(tg28_sw_handle_t handle)
 esp_err_t tg28_sw_set_charge_current(tg28_sw_handle_t handle, uint16_t milliamps)
 {
     uint8_t code = 0;
-    ESP_RETURN_ON_ERROR(encode_charge_current(milliamps, &code),
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_charge_current(milliamps, &code),
                         TAG, "unsupported charge current");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits(handle, TG28_SW_REG_CHARGE_CURRENT,
@@ -444,8 +560,108 @@ esp_err_t tg28_sw_get_charge_current(tg28_sw_handle_t handle, uint16_t *milliamp
             ESP_LOGE(TAG, "reserved charge-current code: 0x%02x", code);
             error = ESP_ERR_INVALID_RESPONSE;
         } else {
-            *milliamps = decode_charge_current(code);
+            *milliamps = tg28_sw_decode_charge_current(code);
         }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_input_current_limit(tg28_sw_handle_t handle,
+        uint16_t milliamps)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "handle is NULL");
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_input_current_limit(milliamps, &code),
+                        TAG, "unsupported input current limit");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_INPUT_CURRENT_LIMIT,
+                                        TG28_SW_INPUT_CURRENT_LIMIT_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_input_current_limit(tg28_sw_handle_t handle,
+        uint16_t *milliamps)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && milliamps != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid limit request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t code = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_INPUT_CURRENT_LIMIT,
+                                     &code, sizeof(code));
+    if (error == ESP_OK) {
+        code &= TG28_SW_INPUT_CURRENT_LIMIT_MASK;
+        if (code >= TG28_SW_INPUT_CURRENT_LIMIT_COUNT) {
+            ESP_LOGE(TAG, "reserved input-current-limit code: 0x%02x", code);
+            error = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *milliamps = tg28_sw_decode_input_current_limit(code);
+        }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_charge_voltage(tg28_sw_handle_t handle,
+                                     uint16_t millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "handle is NULL");
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_charge_voltage(millivolts, &code),
+                        TAG, "unsupported charge voltage");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_CHARGE_VOLTAGE,
+                                        TG28_SW_CHARGE_VOLTAGE_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_charge_voltage(tg28_sw_handle_t handle,
+                                     uint16_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && millivolts != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid voltage request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t code = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_CHARGE_VOLTAGE,
+                                     &code, sizeof(code));
+    if (error == ESP_OK) {
+        code &= TG28_SW_CHARGE_VOLTAGE_MASK;
+        if (code >= TG28_SW_CHARGE_VOLTAGE_COUNT) {
+            ESP_LOGE(TAG, "reserved charge-voltage code: 0x%02x", code);
+            error = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *millivolts = tg28_sw_decode_charge_voltage(code);
+        }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_vindpm(tg28_sw_handle_t handle, uint16_t millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "handle is NULL");
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_vindpm(millivolts, &code),
+                        TAG, "unsupported VINDPM voltage");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_VINDPM,
+                                        TG28_SW_VINDPM_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_vindpm(tg28_sw_handle_t handle, uint16_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && millivolts != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid VINDPM request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t code = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_VINDPM,
+                                     &code, sizeof(code));
+    if (error == ESP_OK) {
+        *millivolts = tg28_sw_decode_vindpm(code);
     }
     unlock_device(handle);
     return error;
@@ -540,7 +756,8 @@ esp_err_t tg28_sw_regulator_set_voltage(tg28_sw_handle_t handle,
     ESP_RETURN_ON_FALSE(regulator_is_valid(regulator), ESP_ERR_INVALID_ARG,
                         TAG, "invalid regulator");
     uint8_t code = 0;
-    ESP_RETURN_ON_ERROR(encode_voltage(&s_regulators[regulator], millivolts, &code),
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_regulator_voltage(regulator, millivolts,
+                        &code),
                         TAG, "unsupported voltage");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const regulator_config_t *config = &s_regulators[regulator];
@@ -562,7 +779,7 @@ esp_err_t tg28_sw_regulator_get_voltage(tg28_sw_handle_t handle,
     const esp_err_t error = read_registers(handle, config->voltage_register,
                                            &code, sizeof(code));
     if (error == ESP_OK) {
-        *millivolts = decode_voltage(config, code & config->voltage_mask);
+        *millivolts = tg28_sw_decode_regulator_voltage(regulator, code);
     }
     unlock_device(handle);
     return error;

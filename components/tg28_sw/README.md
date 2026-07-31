@@ -12,13 +12,19 @@ The implemented interface covers the functions needed by Candis-S31:
 - raw power-on source and explicit power-key interrupt configuration;
 - exact REG62 charge-current control and external fixed-TS selection;
 - verified per-boot download of a battery-specific REGA1 fuel-gauge model;
-- DCDC1-DCDC5, ALDO1-ALDO4, and BLDO1-BLDO2 voltage and enable control;
+- DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, and DLDO1-DLDO2 voltage and enable
+  control (the switch-charger variant has no DCDC5 rail);
+- discrete REG16 input-current-limit and REG64 charge-voltage control;
+- exact REG15 VINDPM threshold control;
 - interrupt status read and write-one-to-clear handling.
 
 Voltage setters reject values that cannot be represented exactly. This keeps a
 board power sequence from silently selecting a different voltage.
 Charge-current setters use the same rule: 0-200 mA is selectable in 25 mA
-steps, followed by 300-1500 mA in 100 mA steps.
+steps, followed by 300-1500 mA in 100 mA steps. The input current limit
+accepts only 100/500/900/1000/1500/2000 mA, the charge voltage only
+3900/4000/4100/4200/4350/4400 mV, and the VINDPM threshold only exact
+80 mV steps in the 4040-4680 mV window accepted by the vendor driver.
 
 ```c
 #include "tg28_sw.h"
