@@ -20,6 +20,8 @@
 #define CST820_TOUCH_COUNT_OFFSET       (2)
 #define CST820_FIRST_POINT_OFFSET       (3)
 #define CST820_CHIP_ID_REG              (0xA7)
+#define CST820_SLEEP_MODE_REG           (0xA5)
+#define CST820_SLEEP_MODE_DEEP          (0x03)
 #define CST820_MAX_TOUCH_POINTS         (2)
 #define CST820_TOUCH_RECORD_SIZE        (6)
 #define CST820_TOUCH_COUNT_MASK         (0x0F)
@@ -33,9 +35,12 @@ static bool esp_lcd_touch_cst820_get_xy(esp_lcd_touch_handle_t tp, uint16_t *x, 
                                         uint16_t *strength, uint8_t *point_num, uint8_t max_point_num);
 static esp_err_t esp_lcd_touch_cst820_get_track_id(esp_lcd_touch_handle_t tp, uint8_t *track_id,
         uint8_t max_point_num);
+static esp_err_t esp_lcd_touch_cst820_enter_sleep(esp_lcd_touch_handle_t tp);
+static esp_err_t esp_lcd_touch_cst820_exit_sleep(esp_lcd_touch_handle_t tp);
 static esp_err_t esp_lcd_touch_cst820_del(esp_lcd_touch_handle_t tp);
 
 static esp_err_t touch_cst820_i2c_read(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t *data, size_t len);
+static esp_err_t touch_cst820_i2c_write(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t data);
 static esp_err_t touch_cst820_reset(esp_lcd_touch_handle_t tp);
 #ifndef CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID
 static esp_err_t touch_cst820_read_id(esp_lcd_touch_handle_t tp);
@@ -60,6 +65,8 @@ esp_err_t esp_lcd_touch_new_i2c_cst820(const esp_lcd_panel_io_handle_t io,
     cst820->read_data = esp_lcd_touch_cst820_read_data;
     cst820->get_xy = esp_lcd_touch_cst820_get_xy;
     cst820->get_track_id = esp_lcd_touch_cst820_get_track_id;
+    cst820->enter_sleep = esp_lcd_touch_cst820_enter_sleep;
+    cst820->exit_sleep = esp_lcd_touch_cst820_exit_sleep;
     cst820->del = esp_lcd_touch_cst820_del;
     cst820->data.lock.owner = portMUX_FREE_VAL;
     memcpy(&cst820->config, config, sizeof(esp_lcd_touch_config_t));
@@ -189,6 +196,35 @@ static esp_err_t esp_lcd_touch_cst820_get_track_id(esp_lcd_touch_handle_t tp, ui
     return ESP_OK;
 }
 
+static esp_err_t esp_lcd_touch_cst820_enter_sleep(esp_lcd_touch_handle_t tp)
+{
+    ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");
+
+    /* Deep sleep. The controller stops answering I2C until a reset cycle. */
+    ESP_RETURN_ON_ERROR(touch_cst820_i2c_write(tp, CST820_SLEEP_MODE_REG,
+                        CST820_SLEEP_MODE_DEEP), TAG, "Sleep command failed");
+
+    return ESP_OK;
+}
+
+static esp_err_t esp_lcd_touch_cst820_exit_sleep(esp_lcd_touch_handle_t tp)
+{
+    ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");
+
+    /* The controller does not answer I2C while sleeping, so wake it with a
+     * hardware reset cycle; without a reset GPIO there is no way out. */
+    ESP_RETURN_ON_FALSE(tp->config.rst_gpio_num != GPIO_NUM_NC, ESP_ERR_NOT_SUPPORTED, TAG,
+                        "Reset GPIO is required to wake the controller");
+    ESP_RETURN_ON_ERROR(touch_cst820_reset(tp), TAG, "Wake-up reset failed");
+    touch_cst820_clear_points(tp);
+#ifndef CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID
+    /* Confirm the controller is back on the bus before reporting success. */
+    ESP_RETURN_ON_ERROR(touch_cst820_read_id(tp), TAG, "Controller ID read after wake-up failed");
+#endif
+
+    return ESP_OK;
+}
+
 static esp_err_t esp_lcd_touch_cst820_del(esp_lcd_touch_handle_t tp)
 {
     ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");
@@ -243,6 +279,15 @@ static esp_err_t touch_cst820_i2c_read(esp_lcd_touch_handle_t tp, uint8_t reg, u
     ESP_RETURN_ON_FALSE(len > 0, ESP_ERR_INVALID_SIZE, TAG, "Read size must be greater than zero");
 
     return esp_lcd_panel_io_rx_param(tp->io, reg, data, len);
+}
+
+static esp_err_t touch_cst820_i2c_write(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t data)
+{
+    ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");
+
+    return esp_lcd_panel_io_tx_param(tp->io, reg, (uint8_t[]) {
+        data
+    }, 1);
 }
 
 static void touch_cst820_clear_points(esp_lcd_touch_handle_t tp)

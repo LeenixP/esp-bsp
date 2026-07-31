@@ -110,6 +110,15 @@ controller firmware's interrupt mode. Once the interrupt polarity has been
 verified on hardware, an ISR callback can wake a task that performs the I2C
 read. Do not access I2C directly from the ISR.
 
+## Sleep mode
+
+`esp_lcd_touch_enter_sleep()` writes register `0xA5` with `0x03` (deep
+sleep). The controller stops answering I2C while asleep, so
+`esp_lcd_touch_exit_sleep()` wakes it with a hardware reset cycle and then
+re-reads the ID register to confirm the controller is back on the bus. A
+reset GPIO is required for wake-up: without it `esp_lcd_touch_exit_sleep()`
+returns `ESP_ERR_NOT_SUPPORTED`.
+
 ## Release resources
 
 Delete resources in the reverse order in which they were created:
