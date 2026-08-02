@@ -1728,7 +1728,7 @@ This function sets up the required I2C bus, video subsystem, and camera clock if
 
 The production module is an OV5640 clocked with a 24 MHz XCLK (`BSP_CAMERA_XCLK_CLOCK_MHZ`); all OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c` enforces this with a compile-time check. Only the DVP video device is initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
 
-Autofocus is not wired up in the BSP yet: the application is expected to drive the VCM (DW9714, pending module-vendor confirmation) through `esp_cam_motor` directly, and EVT1 units run fixed focus. See the TODO note in `bsp_camera.c`.
+Autofocus is not wired up in the BSP yet: a commented-out `cam_motor` configuration block for the suspected VCM (DW9714, SCCB 0x0C, pending module-vendor written confirmation) is preset in `bsp_camera.c` with the enable steps (sdkconfig options + un-comment + `ESP_VIDEO_INIT_FLAGS_MOTOR`). EVT1 units run fixed focus. See the note in `bsp_camera.c`.
 
 ### Example Usage
 

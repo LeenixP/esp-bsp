@@ -54,6 +54,22 @@ menu "Board Support Package (Candis-S31)"
         config BSP_SD_MOUNT_POINT
             string "SD card mount point"
             default "/sdcard"
+
+        config BSP_SPIFFS_FORMAT_ON_MOUNT_FAIL
+            bool "Format SPIFFS when mounting fails"
+            default n
+
+        config BSP_SPIFFS_MOUNT_POINT
+            string "SPIFFS mount point"
+            default "/spiffs"
+
+        config BSP_SPIFFS_PARTITION_LABEL
+            string "Partition label of SPIFFS"
+            default "storage"
+
+        config BSP_SPIFFS_MAX_FILES
+            int "Max files supported for SPIFFS VFS"
+            default 5
     endmenu
 
     menu "Audio"

@@ -15,6 +15,7 @@ idf_component_register(
         esp_lcd_touch
         fatfs
         rx8130ce
+        spiffs
         vfs
     PRIV_REQUIRES
         esp_psram

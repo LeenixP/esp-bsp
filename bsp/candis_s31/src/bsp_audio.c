@@ -66,11 +66,28 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
     }
 
     /* Interface mode note: the Korvo-1 documentation requires the ES8389 to
-     * run in TDM mode, but this BSP (like the official esp32_s31_korvo_1 BSP)
-     * uses I2S STD/Philips mode and the es8389 driver stays in its default
-     * I2S data format. Kept as-is until the ES8389 vendor (Sunking) datasheet
-     * arrives and the TDM requirement can be confirmed; revisit both the I2S
-     * peripheral mode and the codec format together then. */
+     * run in TDM mode ("DAC 与 ADC 信号均须以 TDM 格式发送至 SoC",
+     * esp-dev-kits-zh_CN), but this BSP (like the official esp32_s31_korvo_1
+     * BSP) uses I2S STD/Philips mode and the es8389 driver stays in its
+     * hard-coded default I2S data format. Kept as-is until the Sunking
+     * datasheet confirms the TDM frame layout.
+     *
+     * TDM pre-study (esp_codec_dev ~1.5, ESP-IDF 6.1): the driver exposes no
+     * TDM option - es8389_codec_cfg_t has no format/slot field, and
+     * es8389_set_fs() unconditionally calls es8389_config_fmt(ES_I2S_NORMAL)
+     * (regs 0x20/0x40 DAIFMT bits, reg 0x0C bits[7:5]=0); the only codec
+     * formats are I2S/LJ/RJ/DSP-A/DSP-B (es_common.h es_i2s_fmt_t).
+     * audio_codec_new_i2s_data() merely wraps the already-initialized I2S
+     * channels, so the peripheral mode is fixed by i2s_channel_init_*_mode().
+     * Switching to TDM therefore needs both sides together:
+     * X: here, replace the two i2s_channel_init_std_mode() calls below with
+     *    i2s_channel_init_tdm_mode() + an i2s_tdm_config_t (slot_mask,
+     *    total_slot, ws_width, ...) for the frame the vendor datasheet
+     *    specifies, keeping MCLK = 256*fs and master role;
+     * Y: on the codec side, either patch the es8389 driver to program the
+     *    DSP/TDM bits in regs 0x0C/0x20/0x40 via a new config field, or write
+     *    those registers after open through audio_codec_if_t::set_reg() -
+     *    note that set_fs() re-forces ES_I2S_NORMAL on every stream start. */
     const i2s_std_config_t default_config = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(22050),
         .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(
@@ -221,12 +238,20 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         delete_codec_instance(&s_speaker);
         return NULL;
     }
-    /* TODO(hw): pa_voltage=5.0 / codec_dac_voltage=3.3 are copied from
-     * esp32_s31_korvo_1; the actual PA supply rail on this board still needs
-     * schematic confirmation. These values only feed the esp_codec_dev
-     * hardware-gain dB math, not the analog path itself. */
+    /* Hardware gain values verified against the board schematic rev 0.5,
+     * audio sheet (page 8): the codec AVDD/DVDD/PVDD pins all sit on
+     * AUDIO_3V3_SW, which is TG28 ALDO3 (set to 3.3 V by the audio power-up
+     * in bsp_power.c) through the 0-ohm link R60. The class-D PA (NS4150B,
+     * U23) VCC comes from AUDIO_PA_PVDD_SW, the output of load switch U21
+     * (TPS22917) fed from TG28_VSYS - the TG28 battery/system rail, about
+     * 3.0-4.5 V depending on charge state (TG28 datasheet: VOFF = 2.6 V).
+     * pa_voltage therefore uses 4.2 V (li-ion charge target) rather than the
+     * 5.0 V copied from esp32_s31_korvo_1. Both values only feed the
+     * esp_codec_dev hardware-gain dB math
+     * (esp_codec_dev_col_calc_hw_gain: 20*log10(dac/pa)), not the analog
+     * path itself. */
     const esp_codec_dev_hw_gain_t gain = {
-        .pa_voltage = 5.0,
+        .pa_voltage = 4.2,
         .codec_dac_voltage = 3.3,
     };
     /* The board routes MCLK (GPIO35) to the codec, so clock it from MCLK

@@ -187,6 +187,7 @@
         "esp_lcd_touch",
         "fatfs",
         "rx8130ce",
+        "spiffs",
         "vfs"
     ],
     "BSP_PRIV_REQUIRES": ["esp_psram", "fusb303b", "lwip", "tg28_sw"],

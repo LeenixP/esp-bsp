@@ -9,6 +9,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_spiffs.h"
 
 #include "bsp/candis_s31.h"
 
@@ -139,4 +140,36 @@ esp_err_t bsp_sdcard_unmount(void)
 sdmmc_card_t *bsp_sdcard_get_handle(void)
 {
     return s_card;
+}
+
+esp_err_t bsp_spiffs_mount(void)
+{
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = CONFIG_BSP_SPIFFS_MOUNT_POINT,
+        .partition_label = CONFIG_BSP_SPIFFS_PARTITION_LABEL,
+        .max_files = CONFIG_BSP_SPIFFS_MAX_FILES,
+#if defined(CONFIG_BSP_SPIFFS_FORMAT_ON_MOUNT_FAIL) && CONFIG_BSP_SPIFFS_FORMAT_ON_MOUNT_FAIL
+        .format_if_mount_failed = true,
+#else
+        .format_if_mount_failed = false,
+#endif
+    };
+    ESP_RETURN_ON_ERROR(esp_vfs_spiffs_register(&conf), TAG,
+                        "SPIFFS mount failed");
+
+    size_t total = 0, used = 0;
+    esp_err_t error = esp_spiffs_info(conf.partition_label, &total, &used);
+    if (error != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)",
+                 esp_err_to_name(error));
+    } else {
+        ESP_LOGI(TAG, "SPIFFS mounted at %s: total %d, used %d",
+                 CONFIG_BSP_SPIFFS_MOUNT_POINT, total, used);
+    }
+    return error;
+}
+
+esp_err_t bsp_spiffs_unmount(void)
+{
+    return esp_vfs_spiffs_unregister(CONFIG_BSP_SPIFFS_PARTITION_LABEL);
 }

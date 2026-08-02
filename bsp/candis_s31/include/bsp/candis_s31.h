@@ -72,8 +72,8 @@
 /** @defgroup g01_i2c I2C
  *  @brief Main and low-power I2C buses.
  */
-/** @defgroup g02_storage SD Card
- *  @brief SDMMC storage interface.
+/** @defgroup g02_storage SD Card and SPIFFS
+ *  @brief SDMMC storage and SPIFFS interfaces.
  */
 /** @defgroup g03_audio Audio
  *  @brief I2S and ES8389 audio interface.
@@ -112,6 +112,7 @@
 #define BSP_SD_POWER_EN_ACTIVE_LEVEL           0
 #define BSP_SD_EN                              BSP_SD_POWER_EN
 #define BSP_SD_MOUNT_POINT                     CONFIG_BSP_SD_MOUNT_POINT
+#define BSP_SPIFFS_MOUNT_POINT                 CONFIG_BSP_SPIFFS_MOUNT_POINT
 /** @} */
 
 /** @addtogroup g09_battery
@@ -547,6 +548,10 @@ esp_err_t bsp_sdcard_sdspi_mount(bsp_sdcard_cfg_t *cfg);
 esp_err_t bsp_sdcard_mount(void);
 esp_err_t bsp_sdcard_unmount(void);
 sdmmc_card_t *bsp_sdcard_get_handle(void);
+
+/** SPIFFS on the "storage" partition. */
+esp_err_t bsp_spiffs_mount(void);
+esp_err_t bsp_spiffs_unmount(void);
 /** @} */
 
 /** @addtogroup g03_audio

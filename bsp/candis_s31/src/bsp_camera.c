@@ -79,15 +79,38 @@ esp_err_t bsp_camera_start(const bsp_camera_cfg_t *cfg)
         },
         .xclk_freq = BSP_CAMERA_XCLK_CLOCK_MHZ * 1000000,
     };
-    /* TODO(af): the production OV5640 module has autofocus. The agreed route
-     * is for the application to drive the VCM directly through esp_cam_motor
-     * (DW9714, SCCB address 0x0C - the VCM model still awaits written
-     * confirmation from the module vendor), so this BSP intentionally leaves
-     * esp_video_init_config_t.cam_motor unset. Once the VCM is confirmed:
-     * enable CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER and
-     * CONFIG_CAM_MOTOR_DW9714, fill in cam_motor here and OR
-     * ESP_VIDEO_INIT_FLAGS_MOTOR into the init flags below. EVT1 fallback is
-     * fixed focus (AF unused). */
+    /* TODO(af): the production OV5640 module has autofocus. The VCM is
+     * suspected to be a DW9714 at SCCB address 0x0C (DW9714_SCCB_ADDR in
+     * esp_cam_sensor/motors/dw9714), still awaiting written confirmation from
+     * the module vendor. The BSP intentionally leaves
+     * esp_video_init_config_t.cam_motor unset and EVT1 units run fixed focus
+     * (AF unused).
+     *
+     * Enable steps once the VCM is confirmed:
+     * 1. Get written confirmation of the VCM part number and SCCB address
+     *    from the module vendor.
+     * 2. Enable in sdkconfig: CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
+     *    and CONFIG_CAM_MOTOR_DW9714 (esp_cam_sensor Kconfig; its default
+     *    auto-detect loads the driver during startup).
+     * 3. Uncomment the cam_motor block below and OR
+     *    ESP_VIDEO_INIT_FLAGS_MOTOR into the flags passed to
+     *    esp_video_init_with_flags().
+     *
+     * The motor shares the sensor's SCCB bus (esp_video_init_cam_motor_config_t
+     * in esp_video_init.h; esp_video_init maps it onto esp_cam_motor_config_t
+     * in esp_cam_motor_types.h and calls dw9714_detect()). The production
+     * module's reset/pwdn/signal pin usage is not confirmed yet - the VCM may
+     * share the sensor's RST (GPIO39) / PWDN (GPIO40), or have none. */
+    /* const esp_video_init_cam_motor_config_t cam_motor_config = {
+     *     .sccb_config = {
+     *         .init_sccb = false,
+     *         .i2c_handle = bsp_i2c_get_handle(),
+     *         .freq = 100000,
+     *     },
+     *     .reset_pin = GPIO_NUM_NC,   // -1 if the module has no VCM reset pin
+     *     .pwdn_pin = GPIO_NUM_NC,    // -1 if the module has no VCM pwdn pin
+     *     .signal_pin = GPIO_NUM_NC,  // -1 if the module has no VCM signal pin
+     * }; */
     const esp_video_init_config_t video_config = {
         .dvp = &dvp_config,
     };

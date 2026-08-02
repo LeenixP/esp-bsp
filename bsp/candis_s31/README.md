@@ -65,11 +65,12 @@ interrupt status before enabling the power-key interrupts.
   reference data until that confirmation is complete.
 - Touch support resolves `espressif/esp_lcd_touch_cst820` to the in-tree copy
   under `components/lcd_touch/esp_lcd_touch_cst820` (Apache-2.0) through
-  `override_path` instead of pulling a registry package. The registry package
-  previously used for this controller (`kodediy/esp_lcd_touch_cst820`)
-  shipped stale build artifacts, and the in-tree copy keeps the
-  module-specific CST820 report handling maintainable. It remains the
-  Espressif `esp_lcd_touch` driver and is functionally equivalent.
+  `override_path` instead of pulling a registry package. The in-tree component
+  is a self-maintained implementation, independent of the same-named
+  `kodediy/esp_lcd_touch_cst820` registry package that earlier revisions of
+  this BSP referenced; it keeps the module-specific CST820 report handling
+  maintainable. It remains the Espressif `esp_lcd_touch` driver and is
+  functionally equivalent.
 
 ## Compatible BSP examples
 
@@ -103,8 +104,13 @@ is called. See [API.md](API.md) for resource ownership and shutdown rules.
 
 The reset, power-on, and boot keys are dedicated to the reset path, PMIC, and
 boot strapping. They are not normal application GPIOs. `BSP_CAPS_BUTTONS` is
-therefore zero and the generic audio example, which expects application
-buttons and SPIFFS content, is not listed.
+therefore zero: the generic audio example (`examples/audio`) compiles its
+button handling out via `#if BSP_CAPS_BUTTONS`, so playback and recording
+cannot be triggered from the board itself. See
+`examples/audio/sdkconfig.bsp.candis_s31` for the resulting runtime
+limitations. `bsp_spiffs_mount()` mounts the example SPIFFS partition
+(`CONFIG_BSP_SPIFFS_MOUNT_POINT`, label `CONFIG_BSP_SPIFFS_PARTITION_LABEL`)
+so example file content ships in the flash image.
 
 ## RTC and shared interrupt line
 
@@ -159,10 +165,11 @@ OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c`
 enforces this with a compile-time check. Only the DVP video device is
 initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
 
-Autofocus is not wired up in the BSP yet: the application is expected to drive
-the VCM (DW9714, pending module-vendor confirmation) through `esp_cam_motor`
-directly, and EVT1 units run fixed focus. See the TODO note in
-`bsp_camera.c`.
+Autofocus is not wired up in the BSP yet: a commented-out `cam_motor`
+configuration block for the suspected VCM (DW9714, SCCB 0x0C, pending
+module-vendor written confirmation) is preset in `bsp_camera.c` with the
+enable steps (sdkconfig options + un-comment + `ESP_VIDEO_INIT_FLAGS_MOTOR`).
+EVT1 units run fixed focus. See the note in `bsp_camera.c`.
 
 ## Audio codec
 
