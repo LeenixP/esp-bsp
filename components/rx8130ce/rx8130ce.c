@@ -9,6 +9,7 @@
 
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "rx8130ce.h"
@@ -41,9 +42,28 @@
 
 struct rx8130ce_device_t {
     i2c_master_dev_handle_t i2c_device;
+    SemaphoreHandle_t lock;
 };
 
 static const char *TAG = "rx8130ce";
+
+static esp_err_t lock_device(rx8130ce_handle_t handle)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && handle->i2c_device != NULL &&
+                        handle->lock != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid device handle");
+    ESP_RETURN_ON_FALSE(xSemaphoreTake(handle->lock, portMAX_DELAY) == pdTRUE,
+                        ESP_ERR_TIMEOUT, TAG, "device lock failed");
+    return ESP_OK;
+}
+
+static void unlock_device(rx8130ce_handle_t handle)
+{
+    xSemaphoreGive(handle->lock);
+}
+
+/* The register helpers and the *_locked workers below expect the caller to
+ * hold the device lock (or to run before the handle is published). */
 
 static esp_err_t rx8130ce_read(rx8130ce_handle_t handle, uint8_t reg,
                                void *data, size_t size)
@@ -313,6 +333,11 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
     rx8130ce_handle_t handle = calloc(1, sizeof(*handle));
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_NO_MEM, TAG,
                         "device allocation failed");
+    handle->lock = xSemaphoreCreateMutex();
+    if (handle->lock == NULL) {
+        free(handle);
+        return ESP_ERR_NO_MEM;
+    }
     const i2c_device_config_t device_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = config->device_address,
@@ -341,6 +366,7 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
         if (handle->i2c_device != NULL) {
             i2c_master_bus_rm_device(handle->i2c_device);
         }
+        vSemaphoreDelete(handle->lock);
         free(handle);
         return error;
     }
@@ -350,20 +376,26 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
 
 esp_err_t rx8130ce_delete(rx8130ce_handle_t handle)
 {
-    ESP_RETURN_ON_FALSE(handle != NULL && handle->i2c_device != NULL,
-                        ESP_ERR_INVALID_ARG, TAG, "invalid device handle");
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "handle is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = i2c_master_bus_rm_device(handle->i2c_device);
-    if (error == ESP_OK) {
-        free(handle);
+    if (error != ESP_OK) {
+        unlock_device(handle);
+        return error;
     }
-    return error;
+    handle->i2c_device = NULL;
+    unlock_device(handle);
+    vSemaphoreDelete(handle->lock);
+    handle->lock = NULL;
+    free(handle);
+    return ESP_OK;
 }
 
-esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
-                              rx8130ce_status_t *status)
+/* The caller must already hold the device lock. */
+static esp_err_t get_status_locked(rx8130ce_handle_t handle,
+                                   rx8130ce_status_t *status)
 {
-    ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG,
-                        "status is NULL");
     uint8_t flags = 0;
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1),
                         TAG, "flag read failed");
@@ -371,24 +403,45 @@ esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
     return ESP_OK;
 }
 
-esp_err_t rx8130ce_get_time(rx8130ce_handle_t handle,
-                            rx8130ce_time_t *time,
-                            rx8130ce_status_t *status)
+esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
+                              rx8130ce_status_t *status)
 {
-    ESP_RETURN_ON_FALSE(time != NULL, ESP_ERR_INVALID_ARG, TAG, "time is NULL");
+    ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "status is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_status_locked(handle, status);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t get_time_locked(rx8130ce_handle_t handle,
+                                 rx8130ce_time_t *time,
+                                 rx8130ce_status_t *status)
+{
     uint8_t data[7] = {0};
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_SECONDS, data,
                                       sizeof(data)), TAG, "calendar read failed");
     ESP_RETURN_ON_ERROR(decode_time(data, time), TAG,
                         "calendar decode failed");
-    return status != NULL ? rx8130ce_get_status(handle, status) : ESP_OK;
+    return status != NULL ? get_status_locked(handle, status) : ESP_OK;
 }
 
-esp_err_t rx8130ce_set_time(rx8130ce_handle_t handle,
-                            const rx8130ce_time_t *time)
+esp_err_t rx8130ce_get_time(rx8130ce_handle_t handle,
+                            rx8130ce_time_t *time,
+                            rx8130ce_status_t *status)
 {
-    ESP_RETURN_ON_FALSE(rx8130ce_time_is_valid(time), ESP_ERR_INVALID_ARG,
-                        TAG, "invalid calendar time");
+    ESP_RETURN_ON_FALSE(time != NULL, ESP_ERR_INVALID_ARG, TAG, "time is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_time_locked(handle, time, status);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t set_time_locked(rx8130ce_handle_t handle,
+                                 const rx8130ce_time_t *time)
+{
     const uint8_t data[7] = {
         binary_to_bcd(time->second),
         binary_to_bcd(time->minute),
@@ -425,13 +478,21 @@ esp_err_t rx8130ce_set_time(rx8130ce_handle_t handle,
     return error != ESP_OK ? error : restart_error;
 }
 
-esp_err_t rx8130ce_set_alarm(rx8130ce_handle_t handle,
-                             const rx8130ce_alarm_t *alarm)
+esp_err_t rx8130ce_set_time(rx8130ce_handle_t handle,
+                            const rx8130ce_time_t *time)
 {
-    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
-                        "invalid device handle");
-    ESP_RETURN_ON_FALSE(rx8130ce_alarm_is_valid(alarm), ESP_ERR_INVALID_ARG,
-                        TAG, "invalid alarm");
+    ESP_RETURN_ON_FALSE(rx8130ce_time_is_valid(time), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid calendar time");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = set_time_locked(handle, time);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t set_alarm_locked(rx8130ce_handle_t handle,
+                                  const rx8130ce_alarm_t *alarm)
+{
     uint8_t registers[3];
     bool use_day_alarm = false;
     rx8130ce_alarm_encode(alarm, registers, &use_day_alarm);
@@ -472,13 +533,23 @@ esp_err_t rx8130ce_set_alarm(rx8130ce_handle_t handle,
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
 }
 
-esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
-                             rx8130ce_alarm_t *out_alarm)
+esp_err_t rx8130ce_set_alarm(rx8130ce_handle_t handle,
+                             const rx8130ce_alarm_t *alarm)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
-    ESP_RETURN_ON_FALSE(out_alarm != NULL, ESP_ERR_INVALID_ARG, TAG,
-                        "alarm is NULL");
+    ESP_RETURN_ON_FALSE(rx8130ce_alarm_is_valid(alarm), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid alarm");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = set_alarm_locked(handle, alarm);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t get_alarm_locked(rx8130ce_handle_t handle,
+                                  rx8130ce_alarm_t *out_alarm)
+{
     uint8_t data[3] = {0};
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_ALARM_MINUTE,
                                       data, sizeof(data)), TAG,
@@ -491,10 +562,22 @@ esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
                         out_alarm);
 }
 
-esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable)
+esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
+                             rx8130ce_alarm_t *out_alarm)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
+    ESP_RETURN_ON_FALSE(out_alarm != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "alarm is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_alarm_locked(handle, out_alarm);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t alarm_irq_enable_locked(rx8130ce_handle_t handle, bool enable)
+{
     uint8_t control0 = 0;
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
                                       &control0, 1), TAG,
@@ -507,13 +590,20 @@ esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable)
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
 }
 
-esp_err_t rx8130ce_set_timer(rx8130ce_handle_t handle,
-                             const rx8130ce_timer_t *timer)
+esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
-    ESP_RETURN_ON_FALSE(rx8130ce_timer_is_valid(timer), ESP_ERR_INVALID_ARG,
-                        TAG, "invalid timer");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = alarm_irq_enable_locked(handle, enable);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t set_timer_locked(rx8130ce_handle_t handle,
+                                  const rx8130ce_timer_t *timer)
+{
     uint8_t registers[2];
     uint8_t tsel_bits = 0;
     rx8130ce_timer_encode(timer, registers, &tsel_bits);
@@ -552,13 +642,23 @@ esp_err_t rx8130ce_set_timer(rx8130ce_handle_t handle,
     return ESP_OK;
 }
 
-esp_err_t rx8130ce_get_timer(rx8130ce_handle_t handle,
-                             rx8130ce_timer_t *out_timer)
+esp_err_t rx8130ce_set_timer(rx8130ce_handle_t handle,
+                             const rx8130ce_timer_t *timer)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
-    ESP_RETURN_ON_FALSE(out_timer != NULL, ESP_ERR_INVALID_ARG, TAG,
-                        "timer is NULL");
+    ESP_RETURN_ON_FALSE(rx8130ce_timer_is_valid(timer), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid timer");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = set_timer_locked(handle, timer);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t get_timer_locked(rx8130ce_handle_t handle,
+                                  rx8130ce_timer_t *out_timer)
+{
     uint8_t data[2] = {0};
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_TIMER_COUNTER0,
                                       data, sizeof(data)), TAG,
@@ -579,10 +679,22 @@ esp_err_t rx8130ce_get_timer(rx8130ce_handle_t handle,
     return ESP_OK;
 }
 
-esp_err_t rx8130ce_timer_irq_enable(rx8130ce_handle_t handle, bool enable)
+esp_err_t rx8130ce_get_timer(rx8130ce_handle_t handle,
+                             rx8130ce_timer_t *out_timer)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
+    ESP_RETURN_ON_FALSE(out_timer != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "timer is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_timer_locked(handle, out_timer);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t timer_irq_enable_locked(rx8130ce_handle_t handle, bool enable)
+{
     uint8_t control0 = 0;
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
                                       &control0, 1), TAG,
@@ -595,10 +707,19 @@ esp_err_t rx8130ce_timer_irq_enable(rx8130ce_handle_t handle, bool enable)
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
 }
 
-esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable)
+esp_err_t rx8130ce_timer_irq_enable(rx8130ce_handle_t handle, bool enable)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
                         "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = timer_irq_enable_locked(handle, enable);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t update_irq_enable_locked(rx8130ce_handle_t handle, bool enable)
+{
     uint8_t control0 = 0;
     ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
                                       &control0, 1), TAG,
@@ -611,7 +732,18 @@ esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable)
     return rx8130ce_write(handle, RX8130CE_REG_CONTROL0, &control0, 1);
 }
 
-esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
+esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_irq_enable_locked(handle, enable);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t get_and_clear_interrupts_locked(rx8130ce_handle_t handle,
         uint8_t *flags)
 {
     uint8_t value = 0;
@@ -622,4 +754,13 @@ esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
     }
     value &= ~RX8130CE_INTERRUPT_FLAGS;
     return rx8130ce_write(handle, RX8130CE_REG_FLAGS, &value, 1);
+}
+
+esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
+        uint8_t *flags)
+{
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_and_clear_interrupts_locked(handle, flags);
+    unlock_device(handle);
+    return error;
 }

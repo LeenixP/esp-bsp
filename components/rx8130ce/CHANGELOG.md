@@ -1,5 +1,11 @@
 # ChangeLog
 
+## Unreleased
+
+### Bug Fixes
+
+* Add a per-device mutex so concurrent calls from application tasks and the shared interrupt service cannot interleave the read-modify-write sequences of `set_time`/`set_alarm`/`set_timer` and the IRQ helpers, matching the concurrency model of the tg28_sw driver
+
 ## v0.3.0 - 2026-07-31
 
 ### Features
