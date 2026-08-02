@@ -14,12 +14,15 @@
 
 /* Hardcoded wiring of the Candis-S31 test board this test app runs on
  * (same convention as the other lcd_touch test apps). Adjust these defines
- * when running on a different board. */
+ * when running on a different board. On Candis-S31 the CST820 sits on the
+ * main I2C bus (GPIO33/34) behind the ALDO2 rail, with RST on GPIO17 and
+ * INT on GPIO3; GPIO6/7 are the low-power bus of the PMIC and RTC and must
+ * never be driven here. */
 #define TEST_TOUCH_I2C_PORT       (0)
-#define TEST_TOUCH_I2C_SDA        (GPIO_NUM_8)
-#define TEST_TOUCH_I2C_SCL        (GPIO_NUM_18)
+#define TEST_TOUCH_I2C_SDA        (GPIO_NUM_34)
+#define TEST_TOUCH_I2C_SCL        (GPIO_NUM_33)
 #define TEST_TOUCH_GPIO_INT       (GPIO_NUM_3)
-#define TEST_TOUCH_GPIO_RST       (GPIO_NUM_7)
+#define TEST_TOUCH_GPIO_RST       (GPIO_NUM_17)
 /* Only needs to cover the controller's native coordinate range; not tied to
  * the display panel resolution. */
 #define TEST_TOUCH_H_RES          (460)

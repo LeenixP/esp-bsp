@@ -1,5 +1,11 @@
 # ChangeLog
 
+## Unreleased
+
+### Bug Fixes
+
+* Test app: correct the hardcoded Candis-S31 wiring — SDA=GPIO34, SCL=GPIO33 (main I2C bus), RST=GPIO17, INT=GPIO3. The previous values drove GPIO7, which is the low-power bus SDA shared by the PMIC and RTC
+
 ## v1.1.1 - 2026-07-31
 
 ### Bug Fixes
