@@ -35,11 +35,16 @@
 static const char *TAG = "example";
 static QueueHandle_t audio_button_q = NULL;
 
+/* Boards without application buttons (BSP_CAPS_BUTTONS == 0, e.g. Candis-S31)
+   compile the button handling out. The audio_task then simply waits on the
+   button queue, which is never fed on such boards. */
+#if BSP_CAPS_BUTTONS
 static void btn_handler(void *button_handle, void *usr_data)
 {
     int button_pressed = (int)usr_data;
     xQueueSend(audio_button_q, &button_pressed, 0);
 }
+#endif
 
 // Very simple WAV header, ignores most fields
 typedef struct __attribute__((packed))
@@ -70,6 +75,7 @@ static void audio_task(void *arg)
         int btn_index = 0;
         if (xQueueReceive(audio_button_q, &btn_index, portMAX_DELAY) == pdTRUE) {
             switch (btn_index) {
+#if BSP_CAPS_BUTTONS
             case BSP_BUTTON_REC: {
                 if (mic_codec_dev == NULL) {
                     ESP_LOGW(TAG, "This board does not support microphone recording!");
@@ -185,6 +191,7 @@ static void audio_task(void *arg)
                 ESP_LOGI(TAG, "Volume Up: %i", vol);
                 break;
             }
+#endif
             default:
                 ESP_LOGI(TAG, "No function for this button");
                 break;
@@ -205,6 +212,7 @@ void app_main(void)
     assert(ret == pdPASS);
 
     /* Init audio buttons */
+#if BSP_CAPS_BUTTONS
     button_handle_t btns[BSP_BUTTON_NUM];
     ESP_ERROR_CHECK(bsp_iot_button_create(btns, NULL, BSP_BUTTON_NUM));
     for (int i = 0; i < BSP_BUTTON_NUM; i++) {
@@ -214,4 +222,5 @@ void app_main(void)
         ESP_ERROR_CHECK(iot_button_register_cb(btns[i], BUTTON_PRESS_DOWN, btn_handler, (void *) i));
 #endif
     }
+#endif
 }
