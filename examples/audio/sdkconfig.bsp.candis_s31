@@ -1,0 +1,25 @@
+# Candis-S31 reference configuration for the audio example.
+#
+# Runtime limitations on Candis-S31 (EVT1):
+#   * BSP_CAPS_BUTTONS is 0: the button handling in main.c is compiled out
+#     (#if BSP_CAPS_BUTTONS), so playback/recording cannot be triggered
+#     from the board itself. Building and flashing still validates the BSP
+#     audio init path (I2S STD, ES8389, PA enable) and SPIFFS mounting of
+#     the bundled WAV.
+#   * 22.05 kHz playback and 16 kHz recording exercise the MCLK-based codec
+#     clocking implemented in bsp_audio.c; expected audio behavior needs
+#     EVT1 validation.
+CONFIG_IDF_TARGET="esp32s31"
+CONFIG_BSP_SELECT_CANDIS_S31=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_40M=y
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_CODEC_I2C_BACKWARD_COMPATIBLE=n
+CONFIG_SPIFFS_PAGE_SIZE=1024
