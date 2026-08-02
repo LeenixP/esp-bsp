@@ -2050,7 +2050,7 @@ esp_err_t bsp_shared_irq_register_callback (
 ```
 
 
-Register a falling-edge callback for the shared GPIO2 line. The callback runs in ISR context and must only notify a task; the task then services the line with bsp_shared_irq_service(). Pass NULL to unregister.
+Register a callback for the shared active-low GPIO2 line. The line is level-triggered (wire-ORed sources share it), masked in the ISR, and re-armed by bsp_shared_irq_service(); the callback runs in ISR context and must only notify a task. Pass NULL to unregister.
 ### function `bsp_shared_irq_service`
 
 ```c

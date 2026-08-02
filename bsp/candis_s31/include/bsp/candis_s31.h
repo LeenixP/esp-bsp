@@ -290,6 +290,16 @@ typedef struct {
     bool charging;
     bool charge_done;
 } bsp_pmic_status_t;
+
+/** Channels of the TG28_SW SAR ADC, mirroring the driver channel list. */
+typedef enum {
+    BSP_PMIC_ADC_VBAT = 0,
+    BSP_PMIC_ADC_TS,
+    BSP_PMIC_ADC_VBUS,
+    BSP_PMIC_ADC_VSYS,
+    BSP_PMIC_ADC_TDIE,
+    BSP_PMIC_ADC_COUNT,
+} bsp_pmic_adc_channel_t;
 /** @} */
 
 /** @addtogroup g99_others
@@ -475,6 +485,13 @@ esp_err_t bsp_pmic_regulator_enable(bsp_pmic_regulator_t regulator, bool enable)
 esp_err_t bsp_pmic_regulator_is_enabled(bsp_pmic_regulator_t regulator, bool *enabled);
 esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3]);
 const char *bsp_pmic_regulator_name(bsp_pmic_regulator_t regulator);
+
+/** Read one TG28_SW ADC channel in millivolts. The TDIE channel reports the
+ *  die-temperature sensor voltage, not a temperature; the TS channel reads
+ *  the fixed external input fitted on this board (no battery NTC). A
+ *  channel disabled at the OTP level is enabled for the measurement and
+ *  restored afterwards. */
+esp_err_t bsp_pmic_read_adc_mv(bsp_pmic_adc_channel_t channel, uint16_t *millivolts);
 /** @} */
 
 /** @addtogroup g99_others
@@ -491,10 +508,14 @@ esp_err_t bsp_rtc_get_alarm(bsp_rtc_alarm_t *out_alarm);
 esp_err_t bsp_rtc_alarm_irq_enable(bool enable);
 esp_err_t bsp_rtc_clear_interrupt_flags(uint8_t *flags);
 
-/** Service TG28_SW and RX8130CE until their shared interrupt line is released. */
+/** Service TG28_SW and RX8130CE until their shared interrupt line is released.
+ *  When a callback is registered, the line is re-armed before returning. */
 esp_err_t bsp_shared_irq_service(bsp_shared_irq_status_t *status);
 
-/** Register a callback for the shared active-low interrupt line on GPIO2. */
+/** Register a callback for the shared active-low interrupt line on GPIO2.
+ *  The line is level-triggered (wire-ORed sources share it), masked in the
+ *  ISR, and re-armed by bsp_shared_irq_service(); the callback runs in ISR
+ *  context and must only notify a task. Pass NULL to unregister. */
 esp_err_t bsp_shared_irq_register_callback(bsp_shared_irq_callback_t cb, void *arg);
 /** @} */
 

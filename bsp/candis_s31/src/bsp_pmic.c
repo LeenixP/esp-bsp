@@ -5,6 +5,8 @@
  */
 
 #include "esp_check.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "tg28_sw.h"
 
@@ -15,6 +17,11 @@ static tg28_sw_handle_t s_pmic;
 
 _Static_assert((int)BSP_PMIC_REGULATOR_COUNT == (int)TG28_SW_REGULATOR_COUNT,
                "BSP and TG28_SW regulator lists must stay aligned");
+_Static_assert((int)BSP_PMIC_ADC_COUNT == (int)TG28_SW_ADC_CHANNEL_COUNT,
+               "BSP and TG28_SW ADC channel lists must stay aligned");
+
+/* Allow one conversion cycle when a channel had to be enabled first. */
+#define BSP_PMIC_ADC_SETTLE_MS 50
 
 static tg28_sw_regulator_t to_tg28_regulator(bsp_pmic_regulator_t regulator)
 {
@@ -179,4 +186,28 @@ esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3])
 const char *bsp_pmic_regulator_name(bsp_pmic_regulator_t regulator)
 {
     return tg28_sw_regulator_name(to_tg28_regulator(regulator));
+}
+
+esp_err_t bsp_pmic_read_adc_mv(bsp_pmic_adc_channel_t channel,
+                               uint16_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(millivolts != NULL && channel < BSP_PMIC_ADC_COUNT,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid ADC channel request");
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    const tg28_sw_adc_channel_t adc = (tg28_sw_adc_channel_t)channel;
+    bool was_enabled = false;
+    ESP_RETURN_ON_ERROR(tg28_sw_get_adc_channel_enable(s_pmic, adc,
+                                                       &was_enabled),
+                        TAG, "ADC channel state read failed");
+    if (!was_enabled) {
+        ESP_RETURN_ON_ERROR(tg28_sw_set_adc_channel_enable(s_pmic, adc, true),
+                            TAG, "ADC channel enable failed");
+        /* The result register only refreshes after a conversion cycle. */
+        vTaskDelay(pdMS_TO_TICKS(BSP_PMIC_ADC_SETTLE_MS));
+    }
+    const esp_err_t error = tg28_sw_read_adc_channel(s_pmic, adc, millivolts);
+    if (!was_enabled) {
+        tg28_sw_set_adc_channel_enable(s_pmic, adc, false);
+    }
+    return error;
 }

@@ -126,15 +126,18 @@ while either device has a pending event.
 `bsp_shared_irq_service()` drains both devices over I2C until the line
 releases and reports the combined flags. It can be polled from a task, or
 driven by an interrupt: `bsp_shared_irq_register_callback()` installs a
-falling-edge GPIO handler whose callback runs in ISR context and must only
-notify (for example `xTaskNotifyFromISR()`); the actual I2C servicing still
-happens in task context by calling `bsp_shared_irq_service()`. Passing a NULL
-callback removes the handler again. Register the callback after
-`bsp_board_init()`, which configures the pin with interrupts disabled.
+low-level GPIO handler (edge triggering would lose an event that asserts
+while the other device still holds the line low). The handler masks the
+line and runs the callback in ISR context, which must only notify (for
+example `xTaskNotifyFromISR()`); the actual I2C servicing still happens in
+task context by calling `bsp_shared_irq_service()`, which re-arms the
+interrupt before returning. Passing a NULL callback removes the handler
+again. Register the callback after `bsp_board_init()`, which configures the
+pin with interrupts disabled.
 
 ## Display and touch
 
-The on-board 2.0-inch CO5300 AMOLED (QSPI, 466x466 panel, 460x460 visible window) and the CST820 capacitive touch panel (I2C, `BSP_I2C_NUM`) are both initialized by `bsp_display_start()`.
+The on-board 2.0-inch CO5300 AMOLED (QSPI, 460x460 active area inside a 470x460 GRAM window; the supplier init code sets the column window 10..469) and the CST820 capacitive touch panel (I2C, `BSP_I2C_NUM`) are both initialized by `bsp_display_start()`.
 
 - **Sleep:** `bsp_display_enter_sleep()` / `bsp_display_exit_sleep()` put the panel into/out of sleep-in mode and put the CST820 into deep sleep. The touch controller has no wake pin, so `bsp_display_exit_sleep()` resets it over its RST GPIO and re-checks its chip ID.
 - **Deep standby:** `bsp_display_enter_deep_standby()` additionally sends the CO5300 deep-standby command (RAM content lost). After `bsp_display_exit_deep_standby()` the full display pipeline is rebuilt, but LVGL widgets/screens are not recreated automatically; the application must show its screen again (e.g. `lv_screen_load()`).

@@ -1,5 +1,15 @@
 # ChangeLog
 
+## Unreleased
+
+### Features
+
+* PMIC: add `bsp_pmic_read_adc_mv()` with the `bsp_pmic_adc_channel_t` channel list (VBAT/TS/VBUS/VSYS/TDIE); channels disabled at the OTP level are enabled for the measurement and restored
+
+### Fixed
+
+* Interrupts: the shared PMIC/RTC line on GPIO2 is now level-triggered (`GPIO_INTR_LOW_LEVEL`) instead of falling-edge; an event asserted while the other device still holds the line low no longer goes unnoticed. The ISR masks the line and `bsp_shared_irq_service()` re-arms it after draining both devices. Re-registering a callback now replaces the previous handler instead of failing
+
 ## v1.2.0 - 2026-07-31
 
 ### Features
