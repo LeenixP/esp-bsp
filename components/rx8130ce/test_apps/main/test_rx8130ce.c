@@ -119,6 +119,92 @@ void app_main(void)
     assert(registers[0] == 0x80 && registers[1] == 0x18 &&
            registers[2] == 0x40 && !use_day_alarm);
 
+    /* Absolute-time alarm helper ("wake at a specific moment"). */
+    const rx8130ce_time_t now = {
+        .year = 2026, .month = 8, .day = 5, .weekday = 3,
+        .hour = 10, .minute = 30, .second = 45,
+    };
+    rx8130ce_time_t target = now;
+
+    /* One minute ahead on the same day: minute/hour/day compare, day layout. */
+    target.minute = 31;
+    target.second = 0;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) == ESP_OK);
+    assert(alarm.minute_en && alarm.minute == 31 &&
+           alarm.hour_en && alarm.hour == 10 &&
+           alarm.day_en && alarm.day == 5 && !alarm.weekday_en);
+    rx8130ce_alarm_encode(&alarm, registers, &use_day_alarm);
+    assert(registers[0] == 0x31 && registers[1] == 0x10 &&
+           registers[2] == 0x05 && use_day_alarm);
+
+    /* The target minute must lie strictly ahead of now. */
+    target = now;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+    target.minute = 29;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+    target = now;
+    target.hour = 9;
+    target.minute = 59;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+
+    /* Horizon: 27 days out is accepted, 28 days is rejected. */
+    target = now;
+    target.month = 9;
+    target.day = 1;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) == ESP_OK);
+    assert(alarm.day_en && alarm.day == 1);
+    target.day = 2;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+
+    /* Month roll-over and leap years go through the day count. */
+    const rx8130ce_time_t month_end = {
+        .year = 2026, .month = 8, .day = 31, .weekday = 1,
+        .hour = 23, .minute = 59, .second = 0,
+    };
+    target = month_end;
+    target.month = 9;
+    target.day = 1;
+    target.hour = 0;
+    target.minute = 0;
+    assert(rx8130ce_alarm_from_time(&month_end, &target, &alarm) == ESP_OK);
+
+    const rx8130ce_time_t leap_eve = {
+        .year = 2028, .month = 2, .day = 28, .weekday = 1,
+        .hour = 23, .minute = 59, .second = 0,
+    };
+    target = leap_eve;
+    target.day = 29;
+    target.hour = 0;
+    target.minute = 0;
+    assert(rx8130ce_alarm_from_time(&leap_eve, &target, &alarm) == ESP_OK);
+
+    const rx8130ce_time_t common_eve = {
+        .year = 2027, .month = 2, .day = 28, .weekday = 0,
+        .hour = 23, .minute = 59, .second = 0,
+    };
+    target = common_eve;
+    target.month = 3;
+    target.day = 1;
+    target.hour = 0;
+    target.minute = 0;
+    assert(rx8130ce_alarm_from_time(&common_eve, &target, &alarm) == ESP_OK);
+
+    /* Invalid calendar inputs and NULL pointers are rejected. */
+    target = now;
+    target.month = 13;
+    assert(rx8130ce_alarm_from_time(&now, &target, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+    assert(rx8130ce_alarm_from_time(NULL, &now, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+    assert(rx8130ce_alarm_from_time(&now, NULL, &alarm) ==
+           ESP_ERR_INVALID_ARG);
+    assert(rx8130ce_alarm_from_time(&now, &now, NULL) ==
+           ESP_ERR_INVALID_ARG);
+
     /* Timer validation. */
     const rx8130ce_timer_t one_hour = {
         .enable = true,

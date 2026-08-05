@@ -152,6 +152,55 @@ void rx8130ce_alarm_encode(const rx8130ce_alarm_t *alarm,
     *use_day_alarm = alarm->day_en;
 }
 
+/* Days since 2000-01-01 for a validated calendar value. Inputs always pass
+ * rx8130ce_time_is_valid(), so the year stays within 2000-2099 and the only
+ * leap-year rule needed is year % 4 == 0 (2000 is leap, 2100 out of range). */
+static uint32_t days_since_2000(const rx8130ce_time_t *time)
+{
+    static const uint16_t month_offset[12] = {
+        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334,
+    };
+    const uint16_t year = time->year;
+    uint32_t days = (uint32_t)(year - 2000) * 365 +
+                    (uint32_t)((year - 1) / 4 - 499);
+    days += month_offset[time->month - 1];
+    if (time->month > 2 && (year % 4) == 0) {
+        ++days;
+    }
+    return days + time->day - 1;
+}
+
+esp_err_t rx8130ce_alarm_from_time(const rx8130ce_time_t *now,
+                                   const rx8130ce_time_t *target,
+                                   rx8130ce_alarm_t *out_alarm)
+{
+    ESP_RETURN_ON_FALSE(rx8130ce_time_is_valid(now) &&
+                        rx8130ce_time_is_valid(target) && out_alarm != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid time argument");
+    const uint32_t now_days = days_since_2000(now);
+    const uint32_t target_days = days_since_2000(target);
+    /* Minute granularity: the target minute must be strictly ahead. */
+    ESP_RETURN_ON_FALSE(target_days > now_days ||
+                        (target_days == now_days &&
+                         (target->hour > now->hour ||
+                          (target->hour == now->hour &&
+                           target->minute > now->minute))),
+                        ESP_ERR_INVALID_ARG, TAG, "target is not in the future");
+    /* Beyond this horizon an earlier monthly recurrence of the compare
+     * pattern could match first; see RX8130CE_ALARM_MAX_FUTURE_DAYS. */
+    ESP_RETURN_ON_FALSE(target_days - now_days <= RX8130CE_ALARM_MAX_FUTURE_DAYS,
+                        ESP_ERR_INVALID_ARG, TAG, "target beyond alarm horizon");
+    *out_alarm = (rx8130ce_alarm_t) {
+        .minute_en = true,
+        .minute = target->minute,
+        .hour_en = true,
+        .hour = target->hour,
+        .day_en = true,
+        .day = target->day,
+    };
+    return ESP_OK;
+}
+
 bool rx8130ce_timer_is_valid(const rx8130ce_timer_t *timer)
 {
     return timer != NULL &&
@@ -414,6 +463,54 @@ esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
     return error;
 }
 
+esp_err_t rx8130ce_check_power(rx8130ce_handle_t handle,
+                               rx8130ce_power_check_t *out_check)
+{
+    ESP_RETURN_ON_FALSE(out_check != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "check result is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t flags = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags,
+                                          1);
+    if (error == ESP_OK) {
+        /* Appman 14.5.1: VLF=1 means the register contents are invalid and
+         * all registers should be initialized before use. */
+        *out_check = (rx8130ce_power_check_t) {
+            .voltage_low = (flags & RX8130CE_FLAG_VLF) != 0,
+            .reset_detected = (flags & RX8130CE_FLAG_RSF) != 0,
+            .init_recommended = (flags & RX8130CE_FLAG_VLF) != 0,
+        };
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_set_backup_charge(rx8130ce_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_configure_backup_supply(handle, enable);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_backup_charge(rx8130ce_handle_t handle,
+                                     bool *out_enabled)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && out_enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t control1 = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_CONTROL1,
+                                          &control1, 1);
+    if (error == ESP_OK) {
+        *out_enabled = (control1 & RX8130CE_CONTROL1_CHGEN) != 0;
+    }
+    unlock_device(handle);
+    return error;
+}
+
 /* The caller must already hold the device lock. */
 static esp_err_t get_time_locked(rx8130ce_handle_t handle,
                                  rx8130ce_time_t *time,
@@ -596,6 +693,64 @@ esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable)
                         "invalid device handle");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = alarm_irq_enable_locked(handle, enable);
+    unlock_device(handle);
+    return error;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t clear_alarm_locked(rx8130ce_handle_t handle)
+{
+    /* Every compare field ignored: the hardware then matches once per minute
+     * (appman 14.3.1 note *3), so AIE is held cleared to keep /IRQ released
+     * and AF is dropped afterwards. */
+    const uint8_t registers[3] = {
+        RX8130CE_ALARM_AE, RX8130CE_ALARM_AE, RX8130CE_ALARM_AE,
+    };
+    uint8_t control0 = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_CONTROL0,
+                                      &control0, 1), TAG,
+                        "control register read failed");
+    const uint8_t disabled_control0 = control0 & ~RX8130CE_CONTROL0_AIE;
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_CONTROL0,
+                                       &disabled_control0, 1), TAG,
+                        "alarm interrupt disable failed");
+    ESP_RETURN_ON_ERROR(rx8130ce_write(handle, RX8130CE_REG_ALARM_MINUTE,
+                                       registers, sizeof(registers)), TAG,
+                        "alarm register write failed");
+    uint8_t flags = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1),
+                        TAG, "flag read failed");
+    flags &= ~RX8130CE_FLAG_AF;
+    return rx8130ce_write(handle, RX8130CE_REG_FLAGS, &flags, 1);
+}
+
+esp_err_t rx8130ce_clear_alarm(rx8130ce_handle_t handle)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = clear_alarm_locked(handle);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_and_clear_alarm_flag(rx8130ce_handle_t handle,
+        bool *alarm_flag)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t flags = 0;
+    esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1);
+    if (error == ESP_OK) {
+        if (alarm_flag != NULL) {
+            *alarm_flag = (flags & RX8130CE_FLAG_AF) != 0;
+        }
+        /* Appman 14.3.1: writing 0 clears AF, writing 1 is ignored, so this
+         * read-modify-write cannot disturb the other flags. */
+        flags &= ~RX8130CE_FLAG_AF;
+        error = rx8130ce_write(handle, RX8130CE_REG_FLAGS, &flags, 1);
+    }
     unlock_device(handle);
     return error;
 }

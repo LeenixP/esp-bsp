@@ -128,11 +128,59 @@ typedef struct {
     uint16_t count; /**< Down-counter preset, 1-65535. */
 } rx8130ce_timer_t;
 
+/**
+ * Furthest future target rx8130ce_alarm_from_time() accepts, in days.
+ *
+ * The alarm hardware compares day-of-month, hour, and minute only, so the
+ * same compare pattern recurs every month (and day 29-31 patterns can skip
+ * short months). A target no more than 27 days out is always the first
+ * recurrence of its pattern, because the previous recurrence is at least
+ * 28 days earlier; farther targets could match an earlier recurrence.
+ */
+#define RX8130CE_ALARM_MAX_FUTURE_DAYS 27
+
+/**
+ * Power-on / backup-domain health check result.
+ *
+ * Reported by rx8130ce_check_power(); the driver only reads the flags and
+ * derives advice, it does not modify the device.
+ */
+typedef struct {
+    bool voltage_low;      /**< VLF reads 1: register contents were lost. */
+    bool reset_detected;   /**< RSF reads 1: a reset-voltage event latched. */
+    bool init_recommended; /**< Driver advice: re-initialize and re-set the
+                                calendar (mirrors voltage_low, appman 14.5.1:
+                                VLF=1 requires initializing all registers). */
+} rx8130ce_power_check_t;
+
 /** Return true when a calendar value can be represented by the device. */
 bool rx8130ce_time_is_valid(const rx8130ce_time_t *time);
 
 /** Return true when an alarm value can be represented by the device. */
 bool rx8130ce_alarm_is_valid(const rx8130ce_alarm_t *alarm);
+
+/**
+ * Derive alarm compare settings that fire at an absolute future time.
+ *
+ * Pure helper for the "wake at a specific moment" use case (for example
+ * deep-sleep wake-up on a board without a 32.768 kHz crystal, where the RTC
+ * alarm is the only timed wake-up path): read the current time with
+ * rx8130ce_get_time(), pick the target, and pass both here.
+ *
+ * The result compares minute, hour, and day-of-month; the hardware then
+ * latches AF (and asserts /IRQ when AIE is set) at the start of the target
+ * minute. The target must be at least one minute ahead of now and no more
+ * than RX8130CE_ALARM_MAX_FUTURE_DAYS days out, otherwise the call fails
+ * with ESP_ERR_INVALID_ARG.
+ *
+ * @param now Current calendar time; must pass rx8130ce_time_is_valid().
+ * @param target Wake-up moment; must pass rx8130ce_time_is_valid() and lie
+ *        strictly after now at minute granularity.
+ * @param out_alarm Receives the compare settings for rx8130ce_set_alarm().
+ */
+esp_err_t rx8130ce_alarm_from_time(const rx8130ce_time_t *now,
+                                   const rx8130ce_time_t *target,
+                                   rx8130ce_alarm_t *out_alarm);
 
 /**
  * Encode an alarm into the raw 17h-19h register image.
@@ -189,6 +237,35 @@ esp_err_t rx8130ce_get_status(rx8130ce_handle_t handle,
                               rx8130ce_status_t *status);
 
 /**
+ * Check the power-on / backup-domain health flags (VLF, RSF).
+ *
+ * Advisory and read-only: nothing is cleared or reconfigured. When
+ * init_recommended comes back true, register contents are untrustworthy;
+ * recover by re-setting the calendar with rx8130ce_set_time() (which clears
+ * VLF) and re-applying alarm/timer settings. Note that rx8130ce_create()
+ * already performs the full initialization when it finds VLF=1, so a true
+ * result at runtime means the backup supply dropped out after creation.
+ */
+esp_err_t rx8130ce_check_power(rx8130ce_handle_t handle,
+                               rx8130ce_power_check_t *out_check);
+
+/**
+ * Configure backup battery charging at runtime (CHGEN/INIEN, appman 14.7.2).
+ *
+ * Automatic supply switchover (INIEN=1, the recommended setting) is always
+ * kept enabled; enable selects whether VDD also charges the backup source
+ * (CHGEN). Keep disabled for a primary (non-rechargeable) backup cell;
+ * enable only when the board carries a rechargeable backup source. The
+ * default after rx8130ce_create() comes from
+ * rx8130ce_config_t.backup_charge_enable (off unless configured otherwise).
+ */
+esp_err_t rx8130ce_set_backup_charge(rx8130ce_handle_t handle, bool enable);
+
+/** Read back whether backup battery charging is enabled (CHGEN). */
+esp_err_t rx8130ce_get_backup_charge(rx8130ce_handle_t handle,
+                                     bool *out_enabled);
+
+/**
  * Program the alarm compare registers.
  *
  * AIE is held cleared while the registers change, as recommended by the
@@ -205,6 +282,30 @@ esp_err_t rx8130ce_get_alarm(rx8130ce_handle_t handle,
 
 /** Enable or disable the alarm interrupt output on the /IRQ pin (AIE). */
 esp_err_t rx8130ce_alarm_irq_enable(rx8130ce_handle_t handle, bool enable);
+
+/**
+ * Disarm the alarm: gate /IRQ (AIE=0), ignore all compare fields, and clear
+ * any latched alarm flag.
+ *
+ * With every compare field ignored the hardware matches once per minute
+ * (appman 14.3.1 note *3), so AIE stays cleared to keep /IRQ released and AF
+ * may re-latch afterwards; both are harmless while the alarm is disarmed.
+ * Combine with rx8130ce_alarm_irq_enable() to re-arm after
+ * rx8130ce_set_alarm().
+ */
+esp_err_t rx8130ce_clear_alarm(rx8130ce_handle_t handle);
+
+/**
+ * Report and clear the latched alarm flag (AF).
+ *
+ * Selective variant of rx8130ce_get_and_clear_interrupts() for the shared
+ * /IRQ line: only AF is cleared, UF/TF and the remaining flags are left
+ * untouched. Per the datasheet the flag clears when written 0 and ignores
+ * writes of 1, so the read-modify-write used here cannot disturb other
+ * flags. alarm_flag may be NULL to just clear.
+ */
+esp_err_t rx8130ce_get_and_clear_alarm_flag(rx8130ce_handle_t handle,
+        bool *alarm_flag);
 
 /**
  * Program the fixed-cycle (wake-up) timer.
