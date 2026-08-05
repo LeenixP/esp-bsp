@@ -13,7 +13,9 @@ publish the complete touch report register map. This driver follows the
 slots beginning at bytes 3 and 9. It does not probe CST816-family addresses,
 alias CST816 registers, or fall back to a CST816 compatibility path. Driver
 initialization is limited to reset and an optional ID read; it does not change
-sleep, auto-sleep, or interrupt-mode registers.
+auto-sleep or interrupt-mode registers. The only command write is the sleep
+command used by the power-management APIs below, and its register is an
+assumption pending EVT verification.
 
 If the controller is asleep or its firmware does not expose register `0xA7`,
 enable `CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID`. Touch data can still be
@@ -111,14 +113,71 @@ controller firmware's interrupt mode. Once the interrupt polarity has been
 verified on hardware, an ISR callback can wake a task that performs the I2C
 read. Do not access I2C directly from the ISR.
 
-## Sleep mode
+## Power management
 
-`esp_lcd_touch_enter_sleep()` writes register `0xA5` with `0x03` (deep
-sleep). The controller stops answering I2C while asleep, so
-`esp_lcd_touch_exit_sleep()` wakes it with a hardware reset cycle and then
-re-reads the ID register to confirm the controller is back on the bus. A
-reset GPIO is required for wake-up: without it `esp_lcd_touch_exit_sleep()`
-returns `ESP_ERR_NOT_SUPPORTED`.
+The CST820 has three power modes (DS_CST_820 V1.2): dynamic (~1.9 mA),
+standby (~10 uA) and deep sleep (~2 uA). The driver exposes both low-power
+tiers through explicit APIs that are equivalent to, or build on, the
+`esp_lcd_touch` sleep hooks.
+
+### Deep sleep (`esp_lcd_touch_cst820_sleep()` / `esp_lcd_touch_cst820_wakeup()`)
+
+`esp_lcd_touch_cst820_sleep()` (equivalent to
+`esp_lcd_touch_enter_sleep()`) sends the controller sleep command; the
+controller stops scanning and stops answering I2C. Its INT pin is inactive
+in this mode, so **a touch cannot wake the controller or the host from deep
+sleep** — wake-up is only possible through `esp_lcd_touch_cst820_wakeup()`
+(equivalent to `esp_lcd_touch_exit_sleep()`: a hardware reset cycle,
+Tron = 100 ms) or by power-cycling the touch supply (ALDO2 on Candis-S31).
+Use this tier for shipping/storage states.
+
+The sleep command register is not published in the datasheet. The driver
+uses `0xA5 <- 0x03`, taken from public CST816-family sources; public
+sources disagree (DriveBus documents `0xE5 <- 0x03` as the sleep command
+instead). **This register is an assumption pending EVT verification** — see
+the provenance comment in `esp_lcd_touch_cst820.c`. Wake-up deliberately
+uses only the datasheet-sanctioned reset path, which works regardless of
+whether the sleep command took effect.
+
+### Monitor / standby mode (`esp_lcd_touch_cst820_enter_monitor_mode()` /
+`esp_lcd_touch_cst820_exit_monitor_mode()`)
+
+Standby is the tier for "wake the product by touching the screen": the
+controller keeps scanning at a low frequency and, on a touch or a
+predefined standby gesture, returns to dynamic mode on its own and pulses
+INT to wake the host. Per the datasheet the controller enters standby
+automatically when no touch is detected for 2 s, so no undocumented
+register write is needed and the driver sends none.
+
+Typical low-power sequence on Candis-S31 (INT = GPIO3, active low):
+
+```c
+/* 1. Arm monitor mode; the controller reaches standby <= 2 s after the
+ *    last touch. */
+ESP_ERROR_CHECK(esp_lcd_touch_cst820_enter_monitor_mode(touch));
+
+/* 2. Arm the INT pin as the SoC wake source (light sleep example). */
+ESP_ERROR_CHECK(gpio_wakeup_enable(GPIO_NUM_3, GPIO_INTR_LOW_LEVEL));
+ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
+
+/* 3. Sleep; resumes when the panel is touched. */
+esp_light_sleep_start();
+
+/* 4. Read the wake-up report, then optionally force dynamic mode back
+ *    without waiting for another touch. */
+ESP_ERROR_CHECK(esp_lcd_touch_read_data(touch));
+ESP_ERROR_CHECK(esp_lcd_touch_cst820_exit_monitor_mode(touch));
+```
+
+Notes:
+
+- Allow up to 2 s after the last touch before the controller is actually in
+  standby (datasheet auto-standby timeout).
+- While the host is in light sleep, the controller exits standby by itself
+  when touched; `esp_lcd_touch_cst820_exit_monitor_mode()` is only needed
+  to force dynamic mode without a touch. It requires the reset GPIO.
+- If EVT verifies a forced-standby command for this firmware, the enter
+  function may start sending it; the API contract stays unchanged.
 
 ## Release resources
 
