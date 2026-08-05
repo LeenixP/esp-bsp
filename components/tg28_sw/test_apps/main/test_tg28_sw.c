@@ -63,18 +63,22 @@ static void test_input_current_limit_coding(void)
 
 static void test_charge_voltage_coding(void)
 {
-    static const uint16_t levels[] = {3900, 4000, 4100, 4200, 4350, 4400};
+    /* Switch-charger variant: code 0 is reserved, valid codes are 1-5
+     * (datasheet 6.13.2.63). The linear-variant 3900mV level is gone. */
+    static const uint16_t levels[] = {4000, 4100, 4200, 4350, 4400};
     for (uint8_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
         uint8_t code = 0;
         assert(tg28_sw_encode_charge_voltage(levels[i], &code) == ESP_OK);
-        assert(code == i);
+        assert(code == i + 1);
         assert(tg28_sw_decode_charge_voltage(code) == levels[i]);
     }
 
     uint8_t code = 0;
+    assert(tg28_sw_encode_charge_voltage(3900, &code) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_encode_charge_voltage(4300, &code) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_encode_charge_voltage(4500, &code) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_encode_charge_voltage(3800, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_decode_charge_voltage(0) == 0);
     assert(tg28_sw_decode_charge_voltage(6) == 0);
     assert(tg28_sw_decode_charge_voltage(7) == 0);
 }
@@ -82,14 +86,21 @@ static void test_charge_voltage_coding(void)
 static void test_vindpm_coding(void)
 {
     uint8_t code = 0;
+    /* Full hardware window: 3880 + 80 * code, codes 0-15 (6.13.2.11). */
+    assert(tg28_sw_encode_vindpm(3880, &code) == ESP_OK && code == 0);
     assert(tg28_sw_encode_vindpm(4040, &code) == ESP_OK && code == 2);
+    assert(tg28_sw_encode_vindpm(4360, &code) == ESP_OK && code == 6);
     assert(tg28_sw_encode_vindpm(4680, &code) == ESP_OK && code == 10);
+    assert(tg28_sw_encode_vindpm(5080, &code) == ESP_OK && code == 15);
+    assert(tg28_sw_encode_vindpm(3800, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_vindpm(5160, &code) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_encode_vindpm(4000, &code) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_encode_vindpm(4700, &code) == ESP_ERR_INVALID_ARG);
-    assert(tg28_sw_encode_vindpm(3960, &code) == ESP_ERR_INVALID_ARG);
 
+    assert(tg28_sw_decode_vindpm(0) == 3880);
     assert(tg28_sw_decode_vindpm(2) == 4040);
     assert(tg28_sw_decode_vindpm(10) == 4680);
+    assert(tg28_sw_decode_vindpm(15) == 5080);
 }
 
 static void test_regulator_voltage_coding(void)
@@ -109,12 +120,19 @@ static void test_regulator_voltage_coding(void)
     assert(tg28_sw_decode_regulator_voltage(TG28_SW_ALDO4, 30) == 3500);
     assert(tg28_sw_decode_regulator_voltage(TG28_SW_ALDO4, 31) == 3500);
 
-    /* DLDO1: 500-3500mV in 100mV steps, 5-bit code. */
+    /* DLDO1: 500-3300mV in 100mV steps. The REG99 enumeration stops at code
+     * 28 (3.3V) and marks codes 29-31 reserved, so 3400mV and above are
+     * rejected on encode and out-of-range codes clamp to 3300mV on decode. */
     assert(tg28_sw_encode_regulator_voltage(TG28_SW_DLDO1, 3300, &code) == ESP_OK &&
            code == 28);
     assert(tg28_sw_encode_regulator_voltage(TG28_SW_DLDO1, 3350, &code) ==
            ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_DLDO1, 3400, &code) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_regulator_voltage(TG28_SW_DLDO1, 3500, &code) ==
+           ESP_ERR_INVALID_ARG);
     assert(tg28_sw_decode_regulator_voltage(TG28_SW_DLDO1, 28) == 3300);
+    assert(tg28_sw_decode_regulator_voltage(TG28_SW_DLDO1, 31) == 3300);
 
     /* DLDO2: 500-1400mV in 50mV steps. */
     assert(tg28_sw_encode_regulator_voltage(TG28_SW_DLDO2, 500, &code) == ESP_OK &&
@@ -180,6 +198,103 @@ static void test_adc_channel_coding(void)
     assert(tg28_sw_decode_adc_channel(TG28_SW_ADC_CHANNEL_COUNT, 0x0E, 0x96) == 0);
 }
 
+static void test_precharge_and_termination_coding(void)
+{
+    /* REG61 precharge and REG63 termination share 25mA steps, codes 0-8. */
+    for (uint8_t expected = 0; expected <= 8; ++expected) {
+        uint8_t code = 0;
+        assert(tg28_sw_encode_precharge_current(expected * 25, &code) == ESP_OK);
+        assert(code == expected);
+        assert(tg28_sw_decode_precharge_current(code) == expected * 25);
+        assert(tg28_sw_encode_termination_current(expected * 25, &code) ==
+               ESP_OK);
+        assert(code == expected);
+        assert(tg28_sw_decode_termination_current(code) == expected * 25);
+    }
+
+    uint8_t code = 0;
+    assert(tg28_sw_encode_precharge_current(225, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_precharge_current(250, &code) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_termination_current(225, &code) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_termination_current(210, &code) ==
+           ESP_ERR_INVALID_ARG);
+    /* Codes 9-15 are reserved and decode as 0. */
+    assert(tg28_sw_decode_precharge_current(9) == 0);
+    assert(tg28_sw_decode_precharge_current(15) == 0);
+    assert(tg28_sw_decode_termination_current(9) == 0);
+    assert(tg28_sw_decode_termination_current(15) == 0);
+}
+
+static void test_switch_names(void)
+{
+    assert(TG28_SW_SWITCH_COUNT == 2);
+    assert(strcmp(tg28_sw_switch_name(TG28_SW_SWITCH_DC1SW), "dc1sw") == 0);
+    assert(strcmp(tg28_sw_switch_name(TG28_SW_SWITCH_DC4SW), "dc4sw") == 0);
+    assert(strcmp(tg28_sw_switch_name(TG28_SW_SWITCH_COUNT), "invalid") == 0);
+}
+
+/* IRQ slot numbering: value = bank * 8 + bit, matching the enable registers
+ * REG40-REG42 and the status registers REG48-REG4A bit for bit (datasheet
+ * 6.13.2.41-46). Slot 21 (REG42 bit5) is reserved and has no symbol. */
+_Static_assert(TG28_SW_IRQ_BWUT == 0 && TG28_SW_IRQ_BWOT == 1 &&
+               TG28_SW_IRQ_BCUT == 2 && TG28_SW_IRQ_BCOT == 3 &&
+               TG28_SW_IRQ_LOWSOC == 4 && TG28_SW_IRQ_GWDT == 5 &&
+               TG28_SW_IRQ_SOCWL1 == 6 && TG28_SW_IRQ_SOCWL2 == 7,
+               "IRQ bank0 slots must match REG40 bits");
+_Static_assert(TG28_SW_IRQ_PONPE == 8 && TG28_SW_IRQ_PONNE == 9 &&
+               TG28_SW_IRQ_PONLP == 10 && TG28_SW_IRQ_PONSP == 11 &&
+               TG28_SW_IRQ_BREMOVE == 12 && TG28_SW_IRQ_BINSERT == 13 &&
+               TG28_SW_IRQ_VREMOVE == 14 && TG28_SW_IRQ_VINSERT == 15,
+               "IRQ bank1 slots must match REG41 bits");
+_Static_assert(TG28_SW_IRQ_BOVP == 16 && TG28_SW_IRQ_CHGTE == 17 &&
+               TG28_SW_IRQ_DOTL1 == 18 && TG28_SW_IRQ_CHGST == 19 &&
+               TG28_SW_IRQ_CHGDN == 20 && TG28_SW_IRQ_LDOOC == 22 &&
+               TG28_SW_IRQ_WDEXP == 23 && TG28_SW_IRQ_COUNT == 24,
+               "IRQ bank2 slots must match REG42 bits");
+
+static void test_irq_numbering(void)
+{
+    /* The legacy power-key macros must stay aliases of the bank1 bits. */
+    assert(TG28_SW_POWER_KEY_IRQ_POSITIVE_EDGE ==
+           (1U << (TG28_SW_IRQ_PONPE % 8)));
+    assert(TG28_SW_POWER_KEY_IRQ_NEGATIVE_EDGE ==
+           (1U << (TG28_SW_IRQ_PONNE % 8)));
+    assert(TG28_SW_POWER_KEY_IRQ_LONG_PRESS == (1U << (TG28_SW_IRQ_PONLP % 8)));
+    assert(TG28_SW_POWER_KEY_IRQ_SHORT_PRESS == (1U << (TG28_SW_IRQ_PONSP % 8)));
+    assert(TG28_SW_IRQ_PONPE / 8 == TG28_SW_IRQ_BANK1);
+    assert(TG28_SW_IRQ_VINSERT / 8 == TG28_SW_IRQ_BANK1);
+    assert(TG28_SW_IRQ_WDEXP / 8 == TG28_SW_IRQ_BANK2);
+}
+
+static void test_low_battery_warning_coding(void)
+{
+    /* REG1A: bits 3:0 level1 0-15%, bits 7:4 level2 5-20% (code = % - 5). */
+    uint8_t value = 0;
+    assert(tg28_sw_encode_low_battery_warning(0, 5, &value) == ESP_OK &&
+           value == 0x00);
+    assert(tg28_sw_encode_low_battery_warning(15, 20, &value) == ESP_OK &&
+           value == 0xFF);
+    /* The POR reset value 0xA1 means level1 = 1% and level2 = 15%. */
+    assert(tg28_sw_encode_low_battery_warning(1, 15, &value) == ESP_OK &&
+           value == 0xA1);
+    assert(tg28_sw_encode_low_battery_warning(16, 10, &value) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_low_battery_warning(10, 4, &value) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_encode_low_battery_warning(10, 21, &value) ==
+           ESP_ERR_INVALID_ARG);
+
+    uint8_t level1 = 0;
+    uint8_t level2 = 0;
+    tg28_sw_decode_low_battery_warning(0xA1, &level1, &level2);
+    assert(level1 == 1 && level2 == 15);
+    tg28_sw_decode_low_battery_warning(0x00, &level1, &level2);
+    assert(level1 == 0 && level2 == 5);
+    tg28_sw_decode_low_battery_warning(0xFF, &level1, &level2);
+    assert(level1 == 15 && level2 == 20);
+}
+
 void app_main(void)
 {
     test_chip_id_and_names();
@@ -190,4 +305,8 @@ void app_main(void)
     test_regulator_voltage_coding();
     test_ts_current_coding();
     test_adc_channel_coding();
+    test_precharge_and_termination_coding();
+    test_switch_names();
+    test_irq_numbering();
+    test_low_battery_warning_coding();
 }

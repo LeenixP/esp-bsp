@@ -6,21 +6,26 @@ or board support package remains responsible for the I2C bus and for deciding
 which regulator powers each peripheral.
 
 The implemented interface covers the switch-charger variant's charger,
-fuel-gauge, regulator, ADC, and interrupt control:
+fuel-gauge, regulator, load-switch, ADC, and interrupt control:
 
 - chip identification;
 - VBUS, battery, charge-state, voltage, and state-of-charge readings;
 - raw power-on source and explicit power-key interrupt configuration;
 - exact REG62 charge-current control and REG50 TS pin configuration
   (battery NTC or external fixed input, with current-source control);
-- per-bank IRQ enable control (REG40-REG42);
+- REG61 precharge-current and REG63 termination-current/enable control;
+- per-bank (REG40-REG42) and per-bit IRQ enable control with 23 named
+  interrupt sources (`tg28_sw_irq_t`);
 - 14-bit ADC channel reads for VBAT, TS, VBUS, VSYS, and TDIE with
   REG30 channel-enable management;
 - verified per-boot download of a battery-specific REGA1 fuel-gauge model;
 - DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, CPUSLDO, and DLDO1-DLDO2 voltage
   and enable control (the switch-charger variant has no DCDC5 rail);
+- DC1SW/DC4SW load-switch control for boards whose OTP straps the DLDO
+  pins as switches instead of programmable LDOs;
 - discrete REG16 input-current-limit and REG64 charge-voltage control;
 - exact REG15 VINDPM threshold control;
+- REG1A low-battery warning thresholds;
 - interrupt status read and write-one-to-clear handling.
 
 Voltage setters reject values that cannot be represented exactly. This keeps a
@@ -28,8 +33,8 @@ board power sequence from silently selecting a different voltage.
 Charge-current setters use the same rule: 0-200 mA is selectable in 25 mA
 steps, followed by 300-1500 mA in 100 mA steps. The input current limit
 accepts only 100/500/900/1000/1500/2000 mA, the charge voltage only
-3900/4000/4100/4200/4350/4400 mV, and the VINDPM threshold only exact
-80 mV steps in the 4040-4680 mV window accepted by the vendor driver.
+4000/4100/4200/4350/4400 mV, and the VINDPM threshold only exact 80 mV
+steps across the full 3880-5080 mV hardware range.
 
 ```c
 #include "tg28_sw.h"

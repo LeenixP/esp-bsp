@@ -21,6 +21,7 @@
 #define TG28_SW_REG_INPUT_CURRENT_LIMIT  0x16
 #define TG28_SW_REG_MODE                 0x17
 #define TG28_SW_REG_MODULE_ENABLE        0x18
+#define TG28_SW_REG_LOW_BATTERY_WARNING  0x1A
 #define TG28_SW_REG_POWER_ON_SOURCE      0x20
 #define TG28_SW_REG_ADC_CHANNEL_ENABLE   0x30
 #define TG28_SW_REG_VBAT_H               0x34
@@ -33,7 +34,9 @@
 #define TG28_SW_REG_INT_ENABLE2          0x42
 #define TG28_SW_REG_INT_STATUS0          0x48
 #define TG28_SW_REG_TS_CONFIG            0x50
+#define TG28_SW_REG_PRECHARGE_CURRENT    0x61
 #define TG28_SW_REG_CHARGE_CURRENT       0x62
+#define TG28_SW_REG_TERMINATION_CURRENT  0x63
 #define TG28_SW_REG_CHARGE_VOLTAGE       0x64
 #define TG28_SW_REG_DCDC_ENABLE          0x80
 #define TG28_SW_REG_DCDC1_VOLTAGE        0x82
@@ -67,12 +70,19 @@
 #define TG28_SW_TS_CURRENT_VALUE_MASK    0x03
 #define TG28_SW_TS_CONFIG_MASK           0x1F
 #define TG28_SW_ADC_VALUE_MASK           0x3F
+#define TG28_SW_PRECHARGE_CURRENT_MASK   0x0F
 #define TG28_SW_CHARGE_CURRENT_MASK      0x1F
+#define TG28_SW_TERMINATION_CURRENT_MASK 0x0F
+#define TG28_SW_TERMINATION_ENABLE_MASK  (1U << 4)
 #define TG28_SW_INPUT_CURRENT_LIMIT_MASK 0x07
 #define TG28_SW_CHARGE_VOLTAGE_MASK      0x07
-#define TG28_SW_VINDPM_MASK              0x1F
+/* REG15 bits 7:4 are read-only; VINDPM lives in bits 3:0 (6.13.2.11). */
+#define TG28_SW_VINDPM_MASK              0x0F
 #define TG28_SW_BROM_UPDATE_MARK_MASK    (1U << 4)
 #define TG28_SW_BROM_WRITER_ENABLE_MASK  (1U << 0)
+/* IRQ slot 21 (REG42 bit5) is a reserved read-only bit on the switch-charger
+ * variant and deliberately has no tg28_sw_irq_t symbol. */
+#define TG28_SW_IRQ_RESERVED_SLOT        21
 #define TG28_SW_REGISTER_TIMEOUT_MS      100
 #define TG28_SW_CHARGER_SETTLE_MS        1000
 #define TG28_SW_WRITE_BUFFER_SIZE        4
@@ -136,13 +146,14 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
         1U << 6, 0x1F, 500, 1400, 50, 0, 0
     },
     /* DLDO1/DLDO2 correspond to the vendor driver's LDO10/LDO11. The DLDO1
-     * datasheet section (REG99) is self-contradictory: the headline allows
-     * 0.5-3.4V in 100mV steps while its own enumeration stops at 3.3V
-     * (code 28) and marks codes 29-31 reserved; the vendor driver permits
-     * 500-3500mV. The 500-3500mV range here follows the vendor driver,
-     * pending confirmation on hardware. */
+     * datasheet section (REG99, 6.13.2.84) is self-contradictory: the
+     * headline allows 0.5-3.4V while its own enumeration stops at 3.3V
+     * (code 28) and marks codes 29-31 reserved; the enumeration wins, so the
+     * maximum here is 3300mV. On boards whose OTP straps DLDO1/DLDO2 as
+     * load switches (for example the RGB supply on Candis-S31), the voltage
+     * register is inert and tg28_sw_switch_enable() controls the rail. */
     [TG28_SW_DLDO1] = {"dldo1", TG28_SW_REG_DLDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
-        1U << 7, 0x1F, 500, 3500, 100, 0, 0
+        1U << 7, 0x1F, 500, 3300, 100, 0, 0
     },
     [TG28_SW_DLDO2] = {"dldo2", TG28_SW_REG_DLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE1,
         1U << 0, 0x1F, 500, 1400, 50, 0, 0
@@ -171,14 +182,39 @@ static const uint8_t s_irq_enable_registers[TG28_SW_IRQ_BANK_COUNT] = {
     TG28_SW_REG_INT_ENABLE0, TG28_SW_REG_INT_ENABLE1, TG28_SW_REG_INT_ENABLE2,
 };
 
+/* The switch channels share the physical enable bits of the DLDO1/DLDO2
+ * LDOs: DC1SW is REG90 bit7 and DC4SW is REG91 bit0 (datasheet 6.13.2.75-76);
+ * there is no separate switch control bit. */
+typedef struct {
+    const char *name;
+    uint8_t enable_register;
+    uint8_t enable_mask;
+} power_switch_config_t;
+
+static const power_switch_config_t s_power_switches[TG28_SW_SWITCH_COUNT] = {
+    [TG28_SW_SWITCH_DC1SW] = {"dc1sw", TG28_SW_REG_LDO_ENABLE0, 1U << 7},
+    [TG28_SW_SWITCH_DC4SW] = {"dc4sw", TG28_SW_REG_LDO_ENABLE1, 1U << 0},
+};
+
 static bool regulator_is_valid(tg28_sw_regulator_t regulator)
 {
     return regulator >= 0 && regulator < TG28_SW_REGULATOR_COUNT;
 }
 
+static bool switch_is_valid(tg28_sw_power_switch_t sw)
+{
+    return sw >= 0 && sw < TG28_SW_SWITCH_COUNT;
+}
+
 static bool irq_bank_is_valid(tg28_sw_irq_bank_t bank)
 {
     return bank >= 0 && bank < TG28_SW_IRQ_BANK_COUNT;
+}
+
+static bool irq_is_valid(tg28_sw_irq_t irq)
+{
+    return irq >= 0 && irq < TG28_SW_IRQ_COUNT &&
+           irq != TG28_SW_IRQ_RESERVED_SLOT;
 }
 
 static bool adc_channel_is_valid(tg28_sw_adc_channel_t channel)
@@ -299,8 +335,11 @@ uint16_t tg28_sw_decode_input_current_limit(uint8_t code)
            s_input_current_limits[code] : 0;
 }
 
-/* REG64 charge termination voltage levels (mV) indexed by the 3-bit code. */
-static const uint16_t s_charge_voltages[] = {3900, 4000, 4100, 4200, 4350, 4400};
+/* REG64 charge termination voltage levels (mV) indexed by the 3-bit code.
+ * On the switch-charger variant code 0 is reserved (datasheet 6.13.2.63),
+ * unlike the linear-charger variant, so the entry stays 0 and can be neither
+ * encoded nor decoded. Codes 6-7 are reserved as well. */
+static const uint16_t s_charge_voltages[] = {0, 4000, 4100, 4200, 4350, 4400};
 #define TG28_SW_CHARGE_VOLTAGE_COUNT \
     (sizeof(s_charge_voltages) / sizeof(s_charge_voltages[0]))
 
@@ -308,7 +347,7 @@ esp_err_t tg28_sw_encode_charge_voltage(uint16_t millivolts, uint8_t *code)
 {
     ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
     for (uint8_t i = 0; i < TG28_SW_CHARGE_VOLTAGE_COUNT; ++i) {
-        if (s_charge_voltages[i] == millivolts) {
+        if (s_charge_voltages[i] != 0 && s_charge_voltages[i] == millivolts) {
             *code = i;
             return ESP_OK;
         }
@@ -323,12 +362,12 @@ uint16_t tg28_sw_decode_charge_voltage(uint8_t code)
     return code < TG28_SW_CHARGE_VOLTAGE_COUNT ? s_charge_voltages[code] : 0;
 }
 
-/* REG15 VINDPM: millivolts = 3880 + 80 * code. The vendor driver accepts
- * 4000-4700mV, which lands on codes 2-10 (4040-4680mV). */
+/* REG15 VINDPM: millivolts = 3880 + 80 * code, codes 0-15 (3880-5080mV,
+ * datasheet 6.13.2.11). The narrower 4040-4680mV window of the vendor driver
+ * is a software choice, not a hardware limit, and is not enforced here. */
 #define TG28_SW_VINDPM_BASE_MV    3880
 #define TG28_SW_VINDPM_STEP_MV    80
-#define TG28_SW_VINDPM_MIN_CODE   2
-#define TG28_SW_VINDPM_MAX_CODE   10
+#define TG28_SW_VINDPM_MAX_CODE   15
 
 esp_err_t tg28_sw_encode_vindpm(uint16_t millivolts, uint8_t *code)
 {
@@ -340,8 +379,7 @@ esp_err_t tg28_sw_encode_vindpm(uint16_t millivolts, uint8_t *code)
                         "VINDPM voltage is not representable");
     const uint16_t value =
         (millivolts - TG28_SW_VINDPM_BASE_MV) / TG28_SW_VINDPM_STEP_MV;
-    ESP_RETURN_ON_FALSE(value >= TG28_SW_VINDPM_MIN_CODE &&
-                        value <= TG28_SW_VINDPM_MAX_CODE,
+    ESP_RETURN_ON_FALSE(value <= TG28_SW_VINDPM_MAX_CODE,
                         ESP_ERR_INVALID_ARG, TAG,
                         "VINDPM voltage is out of range");
     *code = (uint8_t)value;
@@ -352,6 +390,64 @@ uint16_t tg28_sw_decode_vindpm(uint8_t code)
 {
     code &= TG28_SW_VINDPM_MASK;
     return TG28_SW_VINDPM_BASE_MV + (uint16_t)code * TG28_SW_VINDPM_STEP_MV;
+}
+
+/* REG61 precharge and REG63 termination currents share the same 4-bit
+ * coding: 25mA per step for codes 0-8 (0-200mA); codes 9-15 are reserved
+ * (datasheet 6.13.2.60 and 6.13.2.62). */
+esp_err_t tg28_sw_encode_precharge_current(uint16_t milliamps, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    ESP_RETURN_ON_FALSE(milliamps <= 200 && milliamps % 25 == 0,
+                        ESP_ERR_INVALID_ARG, TAG,
+                        "precharge current is not representable");
+    *code = (uint8_t)(milliamps / 25);
+    return ESP_OK;
+}
+
+uint16_t tg28_sw_decode_precharge_current(uint8_t code)
+{
+    code &= TG28_SW_PRECHARGE_CURRENT_MASK;
+    return code <= 8 ? (uint16_t)code * 25 : 0;
+}
+
+esp_err_t tg28_sw_encode_termination_current(uint16_t milliamps, uint8_t *code)
+{
+    ESP_RETURN_ON_FALSE(code != NULL, ESP_ERR_INVALID_ARG, TAG, "code is NULL");
+    ESP_RETURN_ON_FALSE(milliamps <= 200 && milliamps % 25 == 0,
+                        ESP_ERR_INVALID_ARG, TAG,
+                        "termination current is not representable");
+    *code = (uint8_t)(milliamps / 25);
+    return ESP_OK;
+}
+
+uint16_t tg28_sw_decode_termination_current(uint8_t code)
+{
+    code &= TG28_SW_TERMINATION_CURRENT_MASK;
+    return code <= 8 ? (uint16_t)code * 25 : 0;
+}
+
+/* REG1A low-battery warning thresholds (datasheet 6.13.2.16): bits 3:0 select
+ * level1 as 0-15% in 1% steps; bits 7:4 select level2 as 5-20% in 1% steps
+ * (code = percent - 5). Every byte value decodes to a valid pair. */
+esp_err_t tg28_sw_encode_low_battery_warning(uint8_t level1_percent,
+        uint8_t level2_percent, uint8_t *value)
+{
+    ESP_RETURN_ON_FALSE(value != NULL, ESP_ERR_INVALID_ARG, TAG, "value is NULL");
+    ESP_RETURN_ON_FALSE(level1_percent <= 15, ESP_ERR_INVALID_ARG, TAG,
+                        "level1 threshold is out of range");
+    ESP_RETURN_ON_FALSE(level2_percent >= 5 && level2_percent <= 20,
+                        ESP_ERR_INVALID_ARG, TAG,
+                        "level2 threshold is out of range");
+    *value = (uint8_t)(((level2_percent - 5) << 4) | level1_percent);
+    return ESP_OK;
+}
+
+void tg28_sw_decode_low_battery_warning(uint8_t value, uint8_t *level1_percent,
+                                        uint8_t *level2_percent)
+{
+    *level1_percent = value & 0x0F;
+    *level2_percent = (uint8_t)(((value >> 4) & 0x0F) + 5);
 }
 
 static esp_err_t encode_voltage(const regulator_config_t *config,
@@ -806,11 +902,12 @@ esp_err_t tg28_sw_get_charge_voltage(tg28_sw_handle_t handle,
                                      &code, sizeof(code));
     if (error == ESP_OK) {
         code &= TG28_SW_CHARGE_VOLTAGE_MASK;
-        if (code >= TG28_SW_CHARGE_VOLTAGE_COUNT) {
+        const uint16_t decoded = tg28_sw_decode_charge_voltage(code);
+        if (decoded == 0) {
             ESP_LOGE(TAG, "reserved charge-voltage code: 0x%02x", code);
             error = ESP_ERR_INVALID_RESPONSE;
         } else {
-            *millivolts = tg28_sw_decode_charge_voltage(code);
+            *millivolts = decoded;
         }
     }
     unlock_device(handle);
@@ -1012,4 +1109,184 @@ esp_err_t tg28_sw_get_and_clear_interrupts(tg28_sw_handle_t handle,
 const char *tg28_sw_regulator_name(tg28_sw_regulator_t regulator)
 {
     return regulator_is_valid(regulator) ? s_regulators[regulator].name : "invalid";
+}
+
+esp_err_t tg28_sw_switch_enable(tg28_sw_handle_t handle,
+                                tg28_sw_power_switch_t sw, bool enable)
+{
+    ESP_RETURN_ON_FALSE(switch_is_valid(sw), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid power switch");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const power_switch_config_t *config = &s_power_switches[sw];
+    const esp_err_t error = update_bits(handle, config->enable_register,
+                                        config->enable_mask,
+                                        enable ? config->enable_mask : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_switch_is_enabled(tg28_sw_handle_t handle,
+                                    tg28_sw_power_switch_t sw, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(switch_is_valid(sw) && enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid switch state request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const power_switch_config_t *config = &s_power_switches[sw];
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, config->enable_register,
+                                           &value, sizeof(value));
+    if (error == ESP_OK) {
+        *enabled = (value & config->enable_mask) != 0;
+    }
+    unlock_device(handle);
+    return error;
+}
+
+const char *tg28_sw_switch_name(tg28_sw_power_switch_t sw)
+{
+    return switch_is_valid(sw) ? s_power_switches[sw].name : "invalid";
+}
+
+esp_err_t tg28_sw_set_irq_enable_bit(tg28_sw_handle_t handle,
+                                     tg28_sw_irq_t irq, bool enable)
+{
+    ESP_RETURN_ON_FALSE(irq_is_valid(irq), ESP_ERR_INVALID_ARG,
+                        TAG, "invalid IRQ source");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const uint8_t bit = (uint8_t)(1U << (irq % 8));
+    const esp_err_t error = update_bits(handle,
+                                        s_irq_enable_registers[irq / 8],
+                                        bit, enable ? bit : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_irq_enable_bit(tg28_sw_handle_t handle,
+                                     tg28_sw_irq_t irq, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(irq_is_valid(irq) && enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid IRQ bit request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle,
+                                           s_irq_enable_registers[irq / 8],
+                                           &value, sizeof(value));
+    if (error == ESP_OK) {
+        *enabled = (value & (1U << (irq % 8))) != 0;
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_precharge_current(tg28_sw_handle_t handle,
+                                        uint16_t milliamps)
+{
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_precharge_current(milliamps, &code),
+                        TAG, "unsupported precharge current");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_PRECHARGE_CURRENT,
+                                        TG28_SW_PRECHARGE_CURRENT_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_precharge_current(tg28_sw_handle_t handle,
+                                        uint16_t *milliamps)
+{
+    ESP_RETURN_ON_FALSE(milliamps != NULL, ESP_ERR_INVALID_ARG,
+                        TAG, "precharge current is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t code = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_PRECHARGE_CURRENT,
+                                     &code, sizeof(code));
+    if (error == ESP_OK) {
+        code &= TG28_SW_PRECHARGE_CURRENT_MASK;
+        if (code > 8) {
+            ESP_LOGE(TAG, "reserved precharge-current code: 0x%02x", code);
+            error = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *milliamps = tg28_sw_decode_precharge_current(code);
+        }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_termination_current(tg28_sw_handle_t handle,
+        uint16_t milliamps, bool enable)
+{
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_termination_current(milliamps, &code),
+                        TAG, "unsupported termination current");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = ESP_OK;
+    if (enable) {
+        error = update_bits(handle, TG28_SW_REG_TERMINATION_CURRENT,
+                            TG28_SW_TERMINATION_ENABLE_MASK |
+                            TG28_SW_TERMINATION_CURRENT_MASK,
+                            TG28_SW_TERMINATION_ENABLE_MASK | code);
+    } else {
+        /* Disabling only clears the enable bit; the current code is kept. */
+        error = update_bits(handle, TG28_SW_REG_TERMINATION_CURRENT,
+                            TG28_SW_TERMINATION_ENABLE_MASK, 0);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_termination_current(tg28_sw_handle_t handle,
+        uint16_t *milliamps, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(milliamps != NULL && enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid termination request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_TERMINATION_CURRENT,
+                                     &value, sizeof(value));
+    if (error == ESP_OK) {
+        *enabled = (value & TG28_SW_TERMINATION_ENABLE_MASK) != 0;
+        const uint8_t code = value & TG28_SW_TERMINATION_CURRENT_MASK;
+        if (code > 8) {
+            ESP_LOGE(TAG, "reserved termination-current code: 0x%02x", code);
+            error = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *milliamps = tg28_sw_decode_termination_current(code);
+        }
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_low_battery_warning(tg28_sw_handle_t handle,
+        uint8_t level1_percent, uint8_t level2_percent)
+{
+    uint8_t value = 0;
+    ESP_RETURN_ON_ERROR(tg28_sw_encode_low_battery_warning(level1_percent,
+                        level2_percent, &value),
+                        TAG, "unsupported warning threshold");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = write_registers(handle,
+                                            TG28_SW_REG_LOW_BATTERY_WARNING,
+                                            &value, sizeof(value));
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_low_battery_warning(tg28_sw_handle_t handle,
+        uint8_t *level1_percent, uint8_t *level2_percent)
+{
+    ESP_RETURN_ON_FALSE(level1_percent != NULL && level2_percent != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid threshold request");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle,
+                                           TG28_SW_REG_LOW_BATTERY_WARNING,
+                                           &value, sizeof(value));
+    if (error == ESP_OK) {
+        tg28_sw_decode_low_battery_warning(value, level1_percent,
+                                           level2_percent);
+    }
+    unlock_device(handle);
+    return error;
 }

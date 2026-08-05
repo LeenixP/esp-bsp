@@ -1,0 +1,13 @@
+menu "TG28 SW test app"
+
+    config TG28_SW_TEST_WITH_HARDWARE
+        bool "Build the on-hardware TG28 tests instead of the pure logic tests"
+        default n
+        help
+            When disabled (default) the test app builds test_tg28_sw.c, which
+            exercises only the pure conversion logic and needs no PMIC. When
+            enabled the app builds test_tg28_sw_hw.c, which talks to a real
+            TG28 over I2C (SCL=GPIO33, SDA=GPIO34, IRQ=GPIO2, address 0x34)
+            and requires a Candis-S31 board or a TG28 EVM.
+
+endmenu
