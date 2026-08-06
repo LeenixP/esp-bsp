@@ -506,6 +506,13 @@ esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
 esp_err_t bsp_pmic_get_power_on_source(uint8_t *source);
+
+/** Power off the board through the TG28_SW soft-PWROFF command (REG10 bit0).
+ *  The PMU enters its off state as soon as the write is acknowledged: every
+ *  rail but the RTCLDO shuts down, the board loses power, and the call does
+ *  not return in practice. Flush any pending log output before calling. */
+esp_err_t bsp_pmic_power_off(void);
+
 esp_err_t bsp_pmic_set_charge_current(uint16_t milliamps);
 esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps);
 esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps);

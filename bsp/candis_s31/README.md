@@ -164,7 +164,7 @@ See [API.md](API.md) for the full function reference.
 ## Camera module
 
 The connector exposes an 8-bit DVP bus. The production camera module uses an
-OV5640 with autofocus, and the checked-in camera example selects its
+OV5640, and the checked-in camera example selects its
 800 x 600 RGB565 DVP mode. Select the corresponding `esp_cam_sensor` option if
 a different module is fitted.
 
@@ -181,11 +181,11 @@ source on the same pin is disconnected in practice. `CONFIG_BSP_CAMERA_XCLK_USE_
 can still route XCLK through LEDC for a diagnostic experiment and is disabled
 by default; `CONFIG_BSP_CAMERA_XCLK_LEDC_CH` only applies when it is enabled.
 
-Autofocus is not wired up in the BSP yet: a commented-out `cam_motor`
-configuration block for the suspected VCM (DW9714, SCCB 0x0C, pending
-module-vendor written confirmation) is preset in `bsp_camera.c` with the
-enable steps (sdkconfig options + un-comment + `ESP_VIDEO_INIT_FLAGS_MOTOR`).
-EVT1 units run fixed focus. See the note in `bsp_camera.c`.
+This board has no autofocus hardware: the schematic carries no VCM driver and
+the camera FPC's AF_VCC pin is tied to the 2.8 V camera rail through a 0 ohm
+resistor with no I2C control path. The OV5640 therefore runs fixed focus, so
+`esp_video_init_config_t.cam_motor` stays unset and only the DVP video device
+is initialized. See the note in `bsp_camera.c`.
 
 ## Audio codec
 

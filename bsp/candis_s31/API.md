@@ -1398,6 +1398,7 @@ The charge current, charge voltage, and input current limit are configured throu
 |  esp\_err\_t | [**bsp\_pmic\_get\_input\_current\_limit**](#function-bsp_pmic_get_input_current_limit) (uint16\_t \*milliamps) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_get\_status**](#function-bsp_pmic_get_status) ([**bsp\_pmic\_status\_t**](#struct-bsp_pmic_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_init**](#function-bsp_pmic_init) (void) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_power\_off**](#function-bsp_pmic_power_off) (void) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_program\_battery\_model**](#function-bsp_pmic_program_battery_model) (const uint8\_t \*model, size\_t size) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_enable**](#function-bsp_pmic_regulator_enable) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, bool enable) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_get\_voltage**](#function-bsp_pmic_regulator_get_voltage) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, uint16\_t \*millivolts) <br> |
@@ -1594,6 +1595,16 @@ esp_err_t bsp_pmic_init (
 
 
 TG28\_SW access. Regulator writes are explicit and never performed by init.
+### function `bsp_pmic_power_off`
+
+```c
+esp_err_t bsp_pmic_power_off (
+    void
+) 
+```
+
+
+Power off the board through the TG28\_SW soft-PWROFF command (REG10 bit0). The PMU enters its off state as soon as the write is acknowledged: every rail but the RTCLDO shuts down, the board loses power, and the call does not return in practice. Flush any pending log output before calling.
 ### function `bsp_pmic_program_battery_model`
 
 ```c
@@ -1728,7 +1739,7 @@ This function sets up the required I2C bus, video subsystem, and camera clock if
 
 The production module is an OV5640 clocked with a 24 MHz XCLK (`BSP_CAMERA_XCLK_CLOCK_MHZ`); all OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c` enforces this with a compile-time check. Only the DVP video device is initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
 
-Autofocus is not wired up in the BSP yet: a commented-out `cam_motor` configuration block for the suspected VCM (DW9714, SCCB 0x0C, pending module-vendor written confirmation) is preset in `bsp_camera.c` with the enable steps (sdkconfig options + un-comment + `ESP_VIDEO_INIT_FLAGS_MOTOR`). EVT1 units run fixed focus. See the note in `bsp_camera.c`.
+This board has no autofocus hardware: the schematic carries no VCM driver and the camera FPC's AF_VCC pin is tied to the 2.8 V camera rail through a 0 ohm resistor with no I2C control path. The OV5640 therefore runs fixed focus, so `esp_video_init_config_t.cam_motor` stays unset and only the DVP video device is initialized. See the note in `bsp_camera.c`.
 
 ### Example Usage
 

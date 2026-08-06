@@ -117,6 +117,12 @@ esp_err_t bsp_pmic_get_power_on_source(uint8_t *source)
     return tg28_sw_get_power_on_source(s_pmic, source);
 }
 
+esp_err_t bsp_pmic_power_off(void)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_power_off(s_pmic);
+}
+
 esp_err_t bsp_pmic_set_charge_current(uint16_t milliamps)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
