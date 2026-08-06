@@ -18,7 +18,7 @@
         {
             "name": "I2S",
             "enabled": ["true", "true"],
-            "BSP_I2S_SAMPLE_RATE": "22050",
+            "BSP_I2S_SAMPLE_RATE": "16000",
             "BSP_I2S_MODE": "STD",
             "BSP_I2S_SLOT_MODE": "I2S_SLOT_MODE_STEREO",
             "pins": {

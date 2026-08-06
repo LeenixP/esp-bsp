@@ -19,6 +19,11 @@ _Static_assert((int)BSP_PMIC_REGULATOR_COUNT == (int)TG28_SW_REGULATOR_COUNT,
                "BSP and TG28_SW regulator lists must stay aligned");
 _Static_assert((int)BSP_PMIC_ADC_COUNT == (int)TG28_SW_ADC_CHANNEL_COUNT,
                "BSP and TG28_SW ADC channel lists must stay aligned");
+_Static_assert((int)BSP_PMIC_SWITCH_COUNT == (int)TG28_SW_SWITCH_COUNT,
+               "BSP and TG28_SW switch lists must stay aligned");
+_Static_assert((int)BSP_PMIC_SWITCH_DC1SW == (int)TG28_SW_SWITCH_DC1SW &&
+               (int)BSP_PMIC_SWITCH_DC4SW == (int)TG28_SW_SWITCH_DC4SW,
+               "BSP and TG28_SW switch order must stay aligned");
 
 /* Allow one conversion cycle when a channel had to be enabled first. */
 #define BSP_PMIC_ADC_SETTLE_MS 50
@@ -26,6 +31,11 @@ _Static_assert((int)BSP_PMIC_ADC_COUNT == (int)TG28_SW_ADC_CHANNEL_COUNT,
 static tg28_sw_regulator_t to_tg28_regulator(bsp_pmic_regulator_t regulator)
 {
     return (tg28_sw_regulator_t)regulator;
+}
+
+static tg28_sw_power_switch_t to_tg28_switch(bsp_pmic_switch_t sw)
+{
+    return (tg28_sw_power_switch_t)sw;
 }
 
 esp_err_t bsp_pmic_init(void)
@@ -175,6 +185,27 @@ esp_err_t bsp_pmic_regulator_is_enabled(bsp_pmic_regulator_t regulator, bool *en
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_regulator_is_enabled(s_pmic, to_tg28_regulator(regulator), enabled);
+}
+
+esp_err_t bsp_pmic_switch_enable(bsp_pmic_switch_t sw, bool enable)
+{
+    ESP_RETURN_ON_FALSE(sw < BSP_PMIC_SWITCH_COUNT, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid load switch");
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_switch_enable(s_pmic, to_tg28_switch(sw), enable);
+}
+
+esp_err_t bsp_pmic_switch_is_enabled(bsp_pmic_switch_t sw, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(sw < BSP_PMIC_SWITCH_COUNT && enabled != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid load switch request");
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_switch_is_enabled(s_pmic, to_tg28_switch(sw), enabled);
+}
+
+const char *bsp_pmic_switch_name(bsp_pmic_switch_t sw)
+{
+    return tg28_sw_switch_name(to_tg28_switch(sw));
 }
 
 esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3])

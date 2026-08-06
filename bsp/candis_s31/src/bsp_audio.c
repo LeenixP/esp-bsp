@@ -89,7 +89,9 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
      *    those registers after open through audio_codec_if_t::set_reg() -
      *    note that set_fs() re-forces ES_I2S_NORMAL on every stream start. */
     const i2s_std_config_t default_config = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(22050),
+        /* BSP_I2S_SAMPLE_RATE must stay a rate the es8389 coefficient table
+         * knows (see the macro comment in bsp/candis_s31.h). */
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(BSP_I2S_SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(
             I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = s_i2s_gpio,
@@ -256,11 +258,12 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
     };
     /* The board routes MCLK (GPIO35) to the codec, so clock it from MCLK
      * instead of deriving the clock from BCLK. Besides using the proper
-     * clock, use_mclk=true makes es8389_set_fs() skip es8389_config_sample(),
-     * whose coefficient table has no entry for e.g. 22050 Hz (that lookup
-     * failure is silently dropped, leaving the codec clocks in their open()
-     * state). open() programs MCLK/LRCK=256, matching the I2S STD default
-     * mclk_multiple=256. */
+     * clock, use_mclk=true makes es8389_set_fs() skip es8389_config_sample()
+     * and its coefficient-table lookup entirely (and set_fs() would drop that
+     * function's error anyway, leaving the codec clocks in their open()
+     * state). BSP_I2S_SAMPLE_RATE is still kept inside that table so the
+     * lookup resolves if this ever runs on the BCLK path. open() programs
+     * MCLK/LRCK=256, matching the I2S STD default mclk_multiple=256. */
     es8389_codec_cfg_t codec_config = {
         .ctrl_if = s_speaker.control,
         .gpio_if = s_speaker.gpio,

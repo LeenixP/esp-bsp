@@ -49,8 +49,16 @@ The board uses the switch-charger variant of the TG28 (I2C address 0x34 on
 the low-power bus). It exposes thirteen rails through `bsp_pmic_regulator_*`:
 DCDC1-DCDC4, ALDO1-ALDO4, BLDO1-BLDO2, CPUSLDO, and DLDO1-DLDO2. The
 linear-charger variant's DCDC5 does not exist here. CPUSLDO is unconnected on
-this board and stays off. DLDO1 is strapped in SWITCH mode and
-passes DCDC1 (3.3V) through to the RGB LED; DLDO2 is an unconnected spare.
+this board and stays off.
+
+The DLDO1 pin is not an LDO on this board: the TG28 OTP (confirmation sheet
+V1.3) straps it as the DC1SW load switch, so its voltage register is inert and
+the output passes DCDC1 (3.3V) straight through to the WS2812B RGB LED. The
+rail is OFF after power-on and software must open it explicitly, which is what
+`bsp_pmic_switch_enable(BSP_PMIC_SWITCH_DC1SW, true)` does; the
+`bsp_pmic_regulator_*` calls must not be used for it. `bsp_led_indicator_create()`
+opens the switch and `bsp_power_safe_state()` closes it again. DLDO2 (DC4SW) is
+an unconnected spare.
 Charger control covers the constant-current limit (0-200mA in 25mA steps,
 then 300-1500mA in 100mA steps), the discrete input current limit
 (100/500/900/1000/1500/2000mA), and the discrete charge termination voltage
@@ -165,6 +173,14 @@ OV5640 register tables in `esp_cam_sensor` assume 24 MHz, and `bsp_camera.c`
 enforces this with a compile-time check. Only the DVP video device is
 initialized (`ESP_VIDEO_INIT_FLAGS_DVP`).
 
+XCLK comes from the CAM controller, which divides it down from PLL_F160M and
+drives it on `dvp_pin.xclk_io` whenever `xclk_io >= 0` and `xclk_freq > 0`
+(`esp_cam_ctlr_dvp_output_clock()` in `esp_video_init.c`). No LEDC channel is
+needed: the GPIO output matrix only keeps the signal attached last, so a second
+source on the same pin is disconnected in practice. `CONFIG_BSP_CAMERA_XCLK_USE_LEDC`
+can still route XCLK through LEDC for a diagnostic experiment and is disabled
+by default; `CONFIG_BSP_CAMERA_XCLK_LEDC_CH` only applies when it is enabled.
+
 Autofocus is not wired up in the BSP yet: a commented-out `cam_motor`
 configuration block for the suspected VCM (DW9714, SCCB 0x0C, pending
 module-vendor written confirmation) is preset in `bsp_camera.c` with the
@@ -176,8 +192,15 @@ EVT1 units run fixed focus. See the note in `bsp_camera.c`.
 The ES8389 codec sits on the main I2C bus (address 0x20) and on I2S
 (MCLK=GPIO35, BCLK=GPIO18, WS=GPIO19, DOUT=GPIO8, DIN=GPIO44); the speaker
 amplifier enable is GPIO42. The BSP clocks the codec from MCLK
-(`use_mclk=true`), which also avoids the es8389 driver's BCLK-derived
-coefficient lookup that has no entry for the default 22050 Hz sample rate.
+(`use_mclk=true`), which also makes `es8389_set_fs()` skip its coefficient
+lookup.
+
+`BSP_I2S_SAMPLE_RATE` is 16000 Hz and `bsp_audio_init()` uses it for its
+default `i2s_std_config_t`. Keep any override inside the es8389 driver's
+coefficient table (`coeff_div[]` in esp_codec_dev `~1.5`:
+8000/16000/24000/32000/44100/48000/88200/96000/192000 Hz) - the previous
+22050 Hz default has no row there, so `es8389_config_sample()` cannot resolve
+codec clocks for it on any BCLK-clocked path.
 
 Speaker and microphone are separate `esp_codec_dev` instances over the same
 chip; whichever side is opened last soft-resets the whole codec. If both

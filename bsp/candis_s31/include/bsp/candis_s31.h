@@ -180,7 +180,21 @@
 /** @addtogroup g03_audio
  *  @{
  */
-#define BSP_I2S_SAMPLE_RATE                    22050
+/* Keep this rate inside the es8389 driver's coefficient table. coeff_div[]
+ * (device/es8389/es8389.c, esp_codec_dev ~1.5) only holds
+ * 8000/16000/24000/32000/44100/48000/88200/96000/192000 Hz, and
+ * es8389_config_sample() looks it up by Ratio = bits * 4 together with
+ * MCLK = rate * bits * 4. At 16 bit, 22050 Hz asks for Ratio 64 @ 1411200 Hz,
+ * which the table does not hold (its only 1411200 Hz row is Ratio 32 @
+ * 44100 Hz), so get_coeff() fails and es8389_config_sample() returns
+ * ESP_CODEC_DEV_NOT_SUPPORT; 16000 Hz resolves to Ratio 64 @ 1024000 Hz,
+ * which is present, and is the rate verified on ES8389 hardware.
+ * This BSP currently passes use_mclk = true, which makes es8389_set_fs()
+ * skip that lookup entirely (and it discards its return value anyway), but a
+ * rate outside the table still has no defined codec clock programming - so
+ * the default must stay a table rate for BCLK-clocked consumers and for the
+ * pending TDM work. */
+#define BSP_I2S_SAMPLE_RATE                    16000
 #define BSP_I2S_SLOT_MODE                      I2S_SLOT_MODE_STEREO
 #define BSP_AUDIO_SPEAKER_CODEC                ES8389
 #define BSP_AUDIO_MIC_CODEC                    ES8389
@@ -274,10 +288,29 @@ typedef enum {
     BSP_PMIC_BLDO1,
     BSP_PMIC_BLDO2,
     BSP_PMIC_CPUSLDO,
+    /** DLDO1 pin. The TG28 OTP on this board straps it as the DC1SW load
+     *  switch, so its voltage register is inert: use BSP_PMIC_SWITCH_DC1SW
+     *  with bsp_pmic_switch_enable() instead of the regulator calls. */
     BSP_PMIC_DLDO1,
+    /** DLDO2 pin; unconnected spare, same OTP switch caveat (DC4SW). */
     BSP_PMIC_DLDO2,
     BSP_PMIC_REGULATOR_COUNT,
 } bsp_pmic_regulator_t;
+
+/**
+ * TG28_SW load-switch outputs, mirroring tg28_sw_power_switch_t.
+ *
+ * A switch passes its input rail straight through, so no voltage programming
+ * applies. On Candis-S31 the TG28 OTP (TG28 confirmation sheet V1.3) straps
+ * the DLDO1 pin as DC1SW: its input is DCDC1 (3.3 V) and it feeds the WS2812B
+ * RGB LED. The rail is OFF after power-on and software must open it
+ * explicitly. DC4SW (DLDO2 pin) is an unconnected spare.
+ */
+typedef enum {
+    BSP_PMIC_SWITCH_DC1SW = 0,  /**< DLDO1 pin as a switch, input = DCDC1 */
+    BSP_PMIC_SWITCH_DC4SW,      /**< DLDO2 pin as a switch, input = DCDC4 */
+    BSP_PMIC_SWITCH_COUNT,
+} bsp_pmic_switch_t;
 
 /** Read-only TG28_SW power and battery snapshot. */
 typedef struct {
@@ -484,6 +517,15 @@ esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);
 esp_err_t bsp_pmic_regulator_enable(bsp_pmic_regulator_t regulator, bool enable);
 esp_err_t bsp_pmic_regulator_is_enabled(bsp_pmic_regulator_t regulator, bool *enabled);
+
+/** Open or close a TG28_SW load-switch output (see bsp_pmic_switch_t). No
+ *  voltage programming applies in switch mode; the switch passes its input
+ *  rail straight through. BSP_PMIC_SWITCH_DC1SW powers the RGB LED on this
+ *  board and is OFF after power-on. */
+esp_err_t bsp_pmic_switch_enable(bsp_pmic_switch_t sw, bool enable);
+esp_err_t bsp_pmic_switch_is_enabled(bsp_pmic_switch_t sw, bool *enabled);
+const char *bsp_pmic_switch_name(bsp_pmic_switch_t sw);
+
 esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3]);
 const char *bsp_pmic_regulator_name(bsp_pmic_regulator_t regulator);
 

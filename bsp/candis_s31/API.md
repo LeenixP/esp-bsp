@@ -483,7 +483,7 @@ esp_codec_dev_handle_t mic_codec_dev = bsp_audio_codec_microphone_init();
 After initialization, the [esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev) API can be used to control playback and recording.
 
 > [!NOTE]
-> On this board the ES8389 is clocked from MCLK (GPIO35, `use_mclk=true`); the codec's BCLK-derived clock path is not used. This also avoids the es8389 driver's BCLK-mode coefficient lookup, which has no entry for the default 22050 Hz sample rate.
+> On this board the ES8389 is clocked from MCLK (GPIO35, `use_mclk=true`); the codec's BCLK-derived clock path is not used, which also makes `es8389_set_fs()` skip its coefficient lookup. The default sample rate `BSP_I2S_SAMPLE_RATE` is 16000 Hz; keep any override inside the es8389 driver's `coeff_div[]` table (8000/16000/24000/32000/44100/48000/88200/96000/192000 Hz).
 
 > [!WARNING]
 > Speaker and microphone are separate codec instances over the same physical ES8389. Opening one side soft-resets the whole codec, so the side opened earlier loses its register state. If both directions are used, open the speaker first and re-verify the speaker -> mic -> speaker sequence (see the note in `bsp_audio.c`).
@@ -577,7 +577,7 @@ esp_codec_dev_close(mic_codec_dev);
 | define  | [**BSP\_I2S\_LCLK**](#define-bsp_i2s_lclk)  BSP\_I2S\_LRCLK<br> |
 | define  | [**BSP\_I2S\_LRCLK**](#define-bsp_i2s_lrclk)  GPIO\_NUM\_19<br> |
 | define  | [**BSP\_I2S\_MCLK**](#define-bsp_i2s_mclk)  GPIO\_NUM\_35<br> |
-| define  | [**BSP\_I2S\_SAMPLE\_RATE**](#define-bsp_i2s_sample_rate)  22050<br> |
+| define  | [**BSP\_I2S\_SAMPLE\_RATE**](#define-bsp_i2s_sample_rate)  16000<br> |
 | define  | [**BSP\_I2S\_SCLK**](#define-bsp_i2s_sclk)  BSP\_I2S\_BCLK<br> |
 | define  | [**BSP\_I2S\_SLOT\_MODE**](#define-bsp_i2s_slot_mode)  I2S\_SLOT\_MODE\_STEREO<br> |
 | define  | [**BSP\_POWER\_AMP\_IO**](#define-bsp_power_amp_io)  BSP\_AUDIO\_PA\_EN<br> |

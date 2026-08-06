@@ -13,10 +13,13 @@ extern blink_step_t const *bsp_led_blink_defaults_lists[];
 
 static const char *TAG = "candis_led";
 
-/* The WS2812B is powered from the TG28_DLDO1 output, which the TG28
- * confirmation sheet straps in SWITCH mode: the output passes DCDC1 (3.3V)
- * through directly, so no voltage programming applies. The rail is OFF by
- * default (OTP) and must be enabled in software before the LED is driven. */
+/* The WS2812B is powered from the TG28 DLDO1 pin, which the TG28 confirmation
+ * sheet V1.3 straps in SWITCH mode (DC1SW): the output passes DCDC1 (3.3V)
+ * through directly, so the DLDO1 voltage register is inert and no voltage
+ * programming applies. The rail is OFF after power-on (OTP default), so
+ * software must open the switch explicitly before the LED is driven -
+ * BSP_PMIC_SWITCH_DC1SW through bsp_pmic_switch_enable(), never the
+ * bsp_pmic_regulator_* calls. */
 static const led_strip_config_t s_strip_config = {
     .strip_gpio_num = BSP_LED_RGB_IO,
     .max_leds = 1,
@@ -60,9 +63,9 @@ esp_err_t bsp_led_indicator_create(led_indicator_handle_t led_array[],
 {
     ESP_RETURN_ON_FALSE(led_array != NULL && led_array_size >= BSP_LED_NUM,
                         ESP_ERR_INVALID_ARG, TAG, "LED array is too small");
-    /* Make sure the DLDO1 switch rail that powers the RGB LED is on. */
-    ESP_RETURN_ON_ERROR(bsp_pmic_regulator_enable(BSP_PMIC_DLDO1, true), TAG,
-                        "RGB LED power rail enable failed");
+    /* Open the DC1SW load switch that powers the RGB LED (OFF after boot). */
+    ESP_RETURN_ON_ERROR(bsp_pmic_switch_enable(BSP_PMIC_SWITCH_DC1SW, true), TAG,
+                        "RGB LED power switch enable failed");
     if (led_cnt != NULL) {
         *led_cnt = 0;
     }

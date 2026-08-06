@@ -129,6 +129,11 @@ esp_err_t bsp_power_safe_state(void)
         BSP_PMIC_BLDO1, BSP_PMIC_BLDO2, BSP_PMIC_DCDC2, BSP_PMIC_DCDC4,
     };
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW safe-state access failed");
+    /* The RGB LED rail is the DC1SW load switch (DLDO1 pin strapped in SWITCH
+     * mode by OTP, input = DCDC1), not a programmable LDO, so it is closed
+     * through the switch API rather than the regulator list below. */
+    ESP_RETURN_ON_ERROR(bsp_pmic_switch_enable(BSP_PMIC_SWITCH_DC1SW, false), TAG,
+                        "TG28_SW RGB LED switch disable failed");
     for (size_t index = 0; index < sizeof(optional_rails) / sizeof(optional_rails[0]); ++index) {
         ESP_RETURN_ON_ERROR(bsp_pmic_regulator_enable(optional_rails[index], false),
                             TAG, "TG28_SW optional rail disable failed");
