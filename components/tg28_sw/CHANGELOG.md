@@ -11,6 +11,7 @@
 * Add `tg28_sw_set_low_battery_warning`/`tg28_sw_get_low_battery_warning` (REG1A, level1 0-15 % and level2 5-20 % in 1 % steps)
 * Widen the REG15 VINDPM window to the full hardware range 3880-5080 mV (codes 0-15)
 * Add hardware-gated test app `test_tg28_sw_hw.c` (`CONFIG_TG28_SW_TEST_WITH_HARDWARE`)
+* Add `tg28_sw_power_off` (REG10 bit0 soft-PWROFF command, datasheet 6.5.4.3) and `tg28_sw_get_power_off_source` (REG21 bit1 software power-off source latch, datasheet 6.13.2.19)
 
 ### Fixes
 

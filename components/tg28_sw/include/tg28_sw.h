@@ -207,6 +207,23 @@ esp_err_t tg28_sw_get_status(tg28_sw_handle_t handle, tg28_sw_status_t *status);
 esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source);
 
 /**
+ * Power off the board through the soft-PWROFF command (REG10 bit0, datasheet
+ * 6.5.4.3 and 6.13.2.7). Once the write is acknowledged the PMU enters its
+ * off state: every DCDC and LDO but the RTCLDO shuts down, 3V3_MAIN
+ * collapses, and the call does not return in practice. Flush any pending log
+ * output before calling. The device lock is released only when the register
+ * write fails.
+ */
+esp_err_t tg28_sw_power_off(tg28_sw_handle_t handle);
+
+/**
+ * Read the latched power-off source (REG21 bit1, datasheet 6.13.2.19).
+ * Writes 1 to *source when the last shutdown was a software power-off and
+ * 0 otherwise.
+ */
+esp_err_t tg28_sw_get_power_off_source(tg28_sw_handle_t handle, uint8_t *source);
+
+/**
  * Write the full enable mask of one IRQ enable bank (REG40-REG42).
  * Status bits keep their latched value; only the enables are replaced.
  */

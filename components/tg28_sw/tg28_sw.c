@@ -17,12 +17,14 @@
 
 #define TG28_SW_REG_COMMON_STATUS0       0x00
 #define TG28_SW_REG_CHIP_ID              0x03
+#define TG28_SW_REG_COMMON_CONFIG        0x10
 #define TG28_SW_REG_VINDPM               0x15
 #define TG28_SW_REG_INPUT_CURRENT_LIMIT  0x16
 #define TG28_SW_REG_MODE                 0x17
 #define TG28_SW_REG_MODULE_ENABLE        0x18
 #define TG28_SW_REG_LOW_BATTERY_WARNING  0x1A
 #define TG28_SW_REG_POWER_ON_SOURCE      0x20
+#define TG28_SW_REG_POWER_OFF_SOURCE     0x21
 #define TG28_SW_REG_ADC_CHANNEL_ENABLE   0x30
 #define TG28_SW_REG_VBAT_H               0x34
 #define TG28_SW_REG_TS_H                 0x36
@@ -64,6 +66,13 @@
 #define TG28_SW_CHARGE_STATE_DONE        0x04
 #define TG28_SW_CHARGER_ENABLE_MASK      (1U << 1)
 #define TG28_SW_GAUGE_MCU_RESET_MASK     (1U << 2)
+/* REG10 common configuration: soft PWROFF and software reset are
+ * self-clearing command bits (datasheet 6.13.2.7). */
+#define TG28_SW_SOFT_PWROFF_MASK         (1U << 0)
+#define TG28_SW_SOFTWARE_RESET_MASK      (1U << 1)
+/* REG21 bit1 latches a software power-off as the power-off source
+ * (datasheet 6.13.2.19). */
+#define TG28_SW_POWER_OFF_SOURCE_MASK    (1U << 1)
 #define TG28_SW_POWER_KEY_IRQ_MASK       0x0F
 #define TG28_SW_TS_MODE_MASK             (1U << 4)
 #define TG28_SW_TS_CURRENT_SOURCE_MASK   (3U << 2)
@@ -695,6 +704,36 @@ esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source)
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = read_registers(handle, TG28_SW_REG_POWER_ON_SOURCE,
                                            source, sizeof(*source));
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_power_off(tg28_sw_handle_t handle)
+{
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_COMMON_CONFIG,
+                                        TG28_SW_SOFT_PWROFF_MASK,
+                                        TG28_SW_SOFT_PWROFF_MASK);
+    if (error != ESP_OK) {
+        unlock_device(handle);
+    }
+    /* On success the write is acknowledged and the PMU enters its off state:
+     * every DCDC and LDO but the RTCLDO shuts down, the board supply
+     * collapses, and this call does not return in practice. There is nothing
+     * left to unlock, so the device lock is released only on failure. */
+    return error;
+}
+
+esp_err_t tg28_sw_get_power_off_source(tg28_sw_handle_t handle, uint8_t *source)
+{
+    ESP_RETURN_ON_FALSE(source != NULL, ESP_ERR_INVALID_ARG, TAG, "source is NULL");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_POWER_OFF_SOURCE,
+                                           &value, sizeof(value));
+    if (error == ESP_OK) {
+        *source = (value & TG28_SW_POWER_OFF_SOURCE_MASK) != 0;
+    }
     unlock_device(handle);
     return error;
 }
