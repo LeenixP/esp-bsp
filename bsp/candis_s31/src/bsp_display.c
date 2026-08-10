@@ -22,11 +22,25 @@
 #include "bsp/candis_s31.h"
 
 static const char *TAG = "candis_display";
+
+/* EVT bring-up starts the panel at 30 % brightness and must never flash
+ * 100 % on the first Display-On. The CO5300 brightness register (WRDISBV,
+ * 0x51) takes percent * 255 / 100, so 30 % is 0x4C. The init sequence below
+ * and the saved-level default here must stay in sync. The 0x63 (WRHBMDISBV)
+ * init value only applies in HBM mode, which this board never enables. */
+#define CO5300_FIRST_BRIGHTNESS_PERCENT  30
+#define CO5300_FIRST_BRIGHTNESS_HW       0x4C
+
 static bsp_lcd_handles_t s_display;
 static bool s_spi_initialized;
 static esp_lcd_touch_handle_t s_touch;
 static esp_lcd_panel_io_handle_t s_touch_io;
 static bool s_deep_standby;
+/* Last brightness chosen through bsp_display_brightness_set(); restored by
+ * bsp_display_backlight_on() so a wake returns to the operator's level
+ * instead of forcing 100 %. Defaults to the same 30 % the panel init
+ * sequence programs, so first light never exceeds the EVT cap. */
+static uint8_t s_brightness_percent = CO5300_FIRST_BRIGHTNESS_PERCENT;
 
 #define CO5300_CMD_DEEP_STANDBY_ON       0x4F
 #define CO5300_DEEP_STANDBY_PARAMETER    0x01
@@ -53,7 +67,9 @@ static const co5300_lcd_init_cmd_t s_panel_init[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    /* WRDISBV capped at the EVT first-light level; 0x51 percent scaling is
+     * percent * 255 / 100. bsp_display_brightness_set() owns later changes. */
+    {0x51, (uint8_t[]){CO5300_FIRST_BRIGHTNESS_HW}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     /* The active 460-pixel window starts at column 10. */
     {0x2A, (uint8_t[]){0x00, 0x0A, 0x01, 0xD5}, 4, 0},
@@ -72,30 +88,42 @@ esp_err_t bsp_display_brightness_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t bsp_display_brightness_set(int brightness_percent)
+/* Write the hardware brightness register without touching the saved level,
+ * so a temporary 0 % (backlight_off) does not erase the operator's choice. */
+static esp_err_t brightness_hw_write(int brightness_percent)
 {
     ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "display is not initialized");
-    ESP_RETURN_ON_FALSE(brightness_percent >= 0 && brightness_percent <= 100,
-                        ESP_ERR_INVALID_ARG, TAG, "brightness must be 0..100");
     return esp_lcd_panel_co5300_set_brightness(s_display.panel,
             (uint8_t)brightness_percent);
 }
 
+esp_err_t bsp_display_brightness_set(int brightness_percent)
+{
+    ESP_RETURN_ON_FALSE(brightness_percent >= 0 && brightness_percent <= 100,
+                        ESP_ERR_INVALID_ARG, TAG, "brightness must be 0..100");
+    ESP_RETURN_ON_ERROR(brightness_hw_write(brightness_percent), TAG,
+                        "brightness update failed");
+    s_brightness_percent = (uint8_t)brightness_percent;
+    return ESP_OK;
+}
+
 esp_err_t bsp_display_backlight_off(void)
 {
-    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(0), TAG,
+    ESP_RETURN_ON_ERROR(brightness_hw_write(0), TAG,
                         "brightness update failed");
     return esp_lcd_panel_disp_on_off(s_display.panel, false);
 }
 
 esp_err_t bsp_display_backlight_on(void)
 {
-    ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
-                        "display is not initialized");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_display.panel, true), TAG,
-                        "display enable failed");
-    return bsp_display_brightness_set(100);
+    /* Re-assert the saved level BEFORE Display-On: the panel must never
+     * light at a stale value. First light therefore comes up at the 30 %
+     * programmed by the init sequence, and a wake restores whatever the
+     * operator last set through bsp_display_brightness_set(). */
+    ESP_RETURN_ON_ERROR(brightness_hw_write(s_brightness_percent), TAG,
+                        "brightness restore failed");
+    return esp_lcd_panel_disp_on_off(s_display.panel, true);
 }
 
 esp_err_t bsp_display_new(const bsp_display_config_t *config,
