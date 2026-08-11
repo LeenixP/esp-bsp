@@ -5,6 +5,7 @@
  */
 
 #include "esp_check.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -52,6 +53,23 @@ esp_err_t bsp_pmic_init(void)
         .scl_speed_hz = TG28_SW_I2C_CLOCK_HZ,
     };
     esp_err_t error = tg28_sw_create(bus, &config, &s_pmic);
+    uint16_t previous_input_limit = 0;
+    if (error == ESP_OK) {
+        error = tg28_sw_get_input_current_limit(s_pmic,
+                                                &previous_input_limit);
+    }
+    if (error == ESP_OK) {
+        /* Type-C1 has fixed Rd resistors but no CC-current detector. Clamp
+         * the TG28 POR value (1500 mA) to one USB unit load before any other
+         * board initialization can increase consumption. */
+        error = tg28_sw_set_input_current_limit(
+                    s_pmic, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
+    }
+    if (error == ESP_OK &&
+            previous_input_limit != BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA) {
+        ESP_LOGW(TAG, "input current limit clamped from %u mA to %u mA",
+                 previous_input_limit, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
+    }
     if (error == ESP_OK) {
         /* Clear any latched interrupt status before enabling the power-key
          * IRQs, like the vendor axp-core driver does at irq-chip init
@@ -137,6 +155,11 @@ esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps)
 
 esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps)
 {
+    /* With fixed Rd and no Rp detector the board cannot prove a 1.5 A/3 A
+     * source. Keep the public board API within legacy/default USB bounds. */
+    ESP_RETURN_ON_FALSE(milliamps == 100 || milliamps == 500,
+                        ESP_ERR_NOT_SUPPORTED, TAG,
+                        "only 100 mA or verified 500 mA input is supported");
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_set_input_current_limit(s_pmic, milliamps);
 }

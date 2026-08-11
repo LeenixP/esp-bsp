@@ -76,7 +76,7 @@ typedef struct {
     bool fault;
     bool remedy_active;
     uint8_t orientation;
-    fusb303b_current_t advertised_current;
+    fusb303b_current_t advertised_current; /*!< Current advertised by the attached partner. */
 } fusb303b_status_t;
 
 /** Return true when the identity registers describe a FUSB303B. */
@@ -142,12 +142,16 @@ esp_err_t fusb303b_set_role(fusb303b_handle_t handle,
                             fusb303b_role_t role,
                             fusb303b_current_t current);
 
+/** Read the active power role, including the Manual.DISABLED override. */
+esp_err_t fusb303b_get_role(fusb303b_handle_t handle,
+                            fusb303b_role_t *role);
+
 /**
  * Read connection state and optionally clear all reported interrupts.
  *
- * The status, type, and interrupt fields are a live register snapshot;
- * device_id and device_type are the read-only identity values verified and
- * cached by fusb303b_create().
+ * The status, type, partner-advertised current, and interrupt fields are a
+ * live register snapshot; device_id and device_type are the read-only identity
+ * values verified and cached by fusb303b_create().
  */
 esp_err_t fusb303b_get_status(fusb303b_handle_t handle,
                               fusb303b_status_t *status,

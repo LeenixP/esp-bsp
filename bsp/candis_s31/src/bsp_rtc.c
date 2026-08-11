@@ -134,6 +134,12 @@ esp_err_t bsp_rtc_alarm_irq_enable(bool enable)
     return rx8130ce_alarm_irq_enable(s_rtc, enable);
 }
 
+esp_err_t bsp_rtc_get_and_clear_alarm_flag(bool *alarm_flag)
+{
+    ESP_RETURN_ON_ERROR(bsp_rtc_init(), TAG, "RX8130CE is unavailable");
+    return rx8130ce_get_and_clear_alarm_flag(s_rtc, alarm_flag);
+}
+
 esp_err_t bsp_rtc_clear_interrupt_flags(uint8_t *flags)
 {
     ESP_RETURN_ON_ERROR(bsp_rtc_init(), TAG, "RX8130CE is unavailable");

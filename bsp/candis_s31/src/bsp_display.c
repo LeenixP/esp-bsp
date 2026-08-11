@@ -45,8 +45,6 @@ static uint8_t s_brightness_percent = CO5300_FIRST_BRIGHTNESS_PERCENT;
 #define CO5300_CMD_DEEP_STANDBY_ON       0x4F
 #define CO5300_DEEP_STANDBY_PARAMETER    0x01
 #define CO5300_SLEEP_TRANSITION_MS       120
-#define CO5300_DEEP_WAKE_RESET_LOW_MS    5
-#define CO5300_RESET_RELEASE_MS          5
 
 /* QSPI panel IO is configured with lcd_cmd_bits=32: commands go on the wire
  * as (0x02 << 24) | (cmd << 8). This mirrors the tx_param() encoding inside
@@ -59,6 +57,44 @@ static lv_display_t *s_lvgl_display;
 static lv_indev_t *s_lvgl_touch;
 static bool s_lvgl_initialized;
 #endif
+
+/* Park peripheral-facing pins as floating inputs (no pull-up/pull-down) so
+ * they cannot back-feed a supply that is about to be removed. */
+static esp_err_t pins_floating(const gpio_num_t *pins, size_t count)
+{
+    uint64_t mask = 0;
+    for (size_t index = 0; index < count; ++index) {
+        mask |= BIT64(pins[index]);
+    }
+    const gpio_config_t config = {
+        .pin_bit_mask = mask,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    return gpio_config(&config);
+}
+
+/* The CST820 driver leaves RST/INT with internal pull-ups enabled when it
+ * deletes them. */
+static esp_err_t touch_pins_floating(void)
+{
+    const gpio_num_t pins[] = { BSP_TOUCH_RST, BSP_TOUCH_INT };
+    return pins_floating(pins, sizeof(pins) / sizeof(pins[0]));
+}
+
+/* EVT1 keeps panel VBAT on TG28_VSYS while VCI/IOVCC are switchable. Float
+ * every QSPI/control pin before rail removal, not only RESX. */
+static esp_err_t display_pins_floating(void)
+{
+    const gpio_num_t pins[] = {
+        BSP_LCD_RST, BSP_LCD_TE, BSP_LCD_CS, BSP_LCD_QSPI_CLK,
+        BSP_LCD_QSPI_DATA0, BSP_LCD_QSPI_DATA1,
+        BSP_LCD_QSPI_DATA2, BSP_LCD_QSPI_DATA3,
+    };
+    return pins_floating(pins, sizeof(pins) / sizeof(pins[0]));
+}
 
 /* AM200Q460460LK supplier initialization sequence, converted to esp_lcd. */
 static const co5300_lcd_init_cmd_t s_panel_init[] = {
@@ -241,7 +277,30 @@ void bsp_display_delete(void)
 {
     s_deep_standby = false;
     if (s_display.panel != NULL) {
-        esp_lcd_panel_disp_on_off(s_display.panel, false);
+        /* Best-effort safe power-down: the CO5300 must see Display-Off and
+         * Sleep-In while the display rail is still up, otherwise the panel
+         * can latch into an undefined state when VCI/VBAT drops. Command
+         * failures are logged, never fatal: this API is void and the rail
+         * must still come down. Once the panel was created, always honor
+         * the SLPIN transition window before deleting it, even if a
+         * command above failed. */
+        const esp_err_t disp_off_error =
+            esp_lcd_panel_disp_on_off(s_display.panel, false);
+        if (disp_off_error != ESP_OK) {
+            ESP_LOGW(TAG, "display-off before delete failed: %s",
+                     esp_err_to_name(disp_off_error));
+        }
+        if (s_display.io != NULL) {
+            const esp_err_t slpin_error = esp_lcd_panel_io_tx_param(
+                                              s_display.io,
+                                              CO5300_QSPI_WRITE_CMD(LCD_CMD_SLPIN),
+                                              NULL, 0);
+            if (slpin_error != ESP_OK) {
+                ESP_LOGW(TAG, "display sleep-in before delete failed: %s",
+                         esp_err_to_name(slpin_error));
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
         esp_lcd_panel_del(s_display.panel);
         s_display.panel = NULL;
     }
@@ -252,6 +311,15 @@ void bsp_display_delete(void)
     if (s_spi_initialized) {
         spi_bus_free(BSP_LCD_SPI_NUM);
         s_spi_initialized = false;
+    }
+    /* The CO5300 driver and SPI teardown may leave output latches or pulls on
+     * panel-facing pins. Float the whole interface before VCI/IOVCC fall:
+     * EVT1 keeps VBAT tied to TG28_VSYS, so a driven QSPI input can otherwise
+     * back-feed the partially powered panel. */
+    const esp_err_t pins_error = display_pins_floating();
+    if (pins_error != ESP_OK) {
+        ESP_LOGW(TAG, "LCD interface pins hi-Z failed: %s",
+                 esp_err_to_name(pins_error));
     }
     bsp_peripheral_power_set(BSP_PERIPHERAL_DISPLAY, false);
 }
@@ -267,7 +335,16 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config,
     }
     ESP_RETURN_ON_ERROR(bsp_peripheral_power_set(BSP_PERIPHERAL_TOUCH, true),
                         TAG, "touch power sequence failed");
-    ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "main I2C init failed");
+    const esp_err_t i2c_error = bsp_i2c_init();
+    if (i2c_error != ESP_OK) {
+        const esp_err_t power_error =
+            bsp_peripheral_power_set(BSP_PERIPHERAL_TOUCH, false);
+        if (power_error != ESP_OK) {
+            ESP_LOGE(TAG, "touch power rollback failed: %s",
+                     esp_err_to_name(power_error));
+        }
+        return i2c_error;
+    }
 
     esp_lcd_panel_io_i2c_config_t io_config =
         ESP_LCD_TOUCH_IO_I2C_CST820_CONFIG();
@@ -300,6 +377,16 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config,
     if (error != ESP_OK) {
         esp_lcd_panel_io_del(s_touch_io);
         s_touch_io = NULL;
+        /* Even a failed CST820 create leaves RST/INT with the internal
+         * pull-up enabled (its del() runs gpio_reset_pin); park both as
+         * floating inputs before ALDO2 comes down. The creation failure is
+         * the first error and stays the return value; cleanup errors are
+         * logged. */
+        const esp_err_t pins_error = touch_pins_floating();
+        if (pins_error != ESP_OK) {
+            ESP_LOGE(TAG, "touch pins hi-Z failed: %s",
+                     esp_err_to_name(pins_error));
+        }
         bsp_peripheral_power_set(BSP_PERIPHERAL_TOUCH, false);
         return error;
     }
@@ -309,24 +396,53 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config,
 
 esp_err_t bsp_touch_delete(void)
 {
-    esp_err_t result = ESP_OK;
+    esp_err_t first_error = ESP_OK;
     if (s_touch != NULL) {
-        result = esp_lcd_touch_del(s_touch);
-        if (result != ESP_OK) {
-            return result;
+        const esp_err_t error = esp_lcd_touch_del(s_touch);
+        if (error == ESP_OK) {
+            s_touch = NULL;
+        } else {
+            ESP_LOGE(TAG, "touch delete failed: %s", esp_err_to_name(error));
+            first_error = error;
         }
-        s_touch = NULL;
     }
-    if (s_touch_io != NULL) {
-        result = esp_lcd_panel_io_del(s_touch_io);
-        if (result != ESP_OK) {
-            return result;
+    /* The touch object owns the panel IO. Do not delete that IO underneath a
+     * touch object whose delete failed; retain both handles for diagnostics.
+     * Supply removal below is still mandatory. */
+    if (s_touch == NULL && s_touch_io != NULL) {
+        const esp_err_t error = esp_lcd_panel_io_del(s_touch_io);
+        if (error == ESP_OK) {
+            s_touch_io = NULL;
+        } else {
+            ESP_LOGE(TAG, "touch panel IO delete failed: %s",
+                     esp_err_to_name(error));
+            if (first_error == ESP_OK) {
+                first_error = error;
+            }
         }
-        s_touch_io = NULL;
     }
-    ESP_RETURN_ON_ERROR(bsp_peripheral_power_set(BSP_PERIPHERAL_TOUCH, false),
-                        TAG, "touch power-down failed");
-    return ESP_OK;
+    /* The CST820 driver's del() left RST/INT with the internal pull-up
+     * enabled; park both as floating inputs before ALDO2 comes down so
+     * neither can back-feed the unpowered controller. Teardown remains
+     * best-effort: a handle-release failure never skips pin or rail safety. */
+    const esp_err_t pins_error = touch_pins_floating();
+    if (pins_error != ESP_OK) {
+        ESP_LOGE(TAG, "touch pins hi-Z failed: %s",
+                 esp_err_to_name(pins_error));
+        if (first_error == ESP_OK) {
+            first_error = pins_error;
+        }
+    }
+    const esp_err_t power_error =
+        bsp_peripheral_power_set(BSP_PERIPHERAL_TOUCH, false);
+    if (power_error != ESP_OK) {
+        ESP_LOGE(TAG, "touch power-down failed: %s",
+                 esp_err_to_name(power_error));
+        if (first_error == ESP_OK) {
+            first_error = power_error;
+        }
+    }
+    return first_error;
 }
 
 esp_lcd_touch_handle_t bsp_touch_get_handle(void)
@@ -426,31 +542,53 @@ lv_display_t *bsp_display_start_with_config(const bsp_display_cfg_t *config)
 
 esp_err_t bsp_display_stop(void)
 {
-    esp_err_t result = ESP_OK;
+    esp_err_t first_error = ESP_OK;
     if (s_lvgl_touch != NULL) {
-        result = lvgl_port_remove_touch(s_lvgl_touch);
-        if (result != ESP_OK) {
-            return result;
-        }
+        const esp_err_t error = lvgl_port_remove_touch(s_lvgl_touch);
+        /* Teardown is terminal. A removal failure may leave LVGL internals
+         * allocated, but the BSP must never expose a handle whose hardware is
+         * about to be deinitialized and unpowered. */
         s_lvgl_touch = NULL;
+        if (error != ESP_OK) {
+            ESP_LOGE(TAG, "LVGL touch removal failed: %s",
+                     esp_err_to_name(error));
+            first_error = error;
+        }
     }
     if (s_lvgl_display != NULL) {
-        result = lvgl_port_remove_disp(s_lvgl_display);
-        if (result != ESP_OK) {
-            return result;
-        }
+        const esp_err_t error = lvgl_port_remove_disp(s_lvgl_display);
         s_lvgl_display = NULL;
-    }
-    if (s_lvgl_initialized) {
-        result = lvgl_port_deinit();
-        if (result != ESP_OK) {
-            return result;
+        if (error != ESP_OK) {
+            ESP_LOGE(TAG, "LVGL display removal failed: %s",
+                     esp_err_to_name(error));
+            if (first_error == ESP_OK) {
+                first_error = error;
+            }
         }
-        s_lvgl_initialized = false;
     }
-    ESP_RETURN_ON_ERROR(bsp_touch_delete(), TAG, "touch delete failed");
+    if (s_lvgl_initialized && s_lvgl_touch == NULL &&
+            s_lvgl_display == NULL) {
+        const esp_err_t error = lvgl_port_deinit();
+        if (error == ESP_OK) {
+            s_lvgl_initialized = false;
+        } else {
+            ESP_LOGE(TAG, "LVGL port deinit failed: %s",
+                     esp_err_to_name(error));
+            if (first_error == ESP_OK) {
+                first_error = error;
+            }
+        }
+    }
+
+    /* Power safety is not conditional on LVGL cleanup succeeding. A failed
+     * remove may leak LVGL state until reboot, but every BSP handle above is
+     * invalidated before panel/touch objects and rails are torn down. */
+    const esp_err_t touch_error = bsp_touch_delete();
+    if (first_error == ESP_OK && touch_error != ESP_OK) {
+        first_error = touch_error;
+    }
     bsp_display_delete();
-    return ESP_OK;
+    return first_error;
 }
 
 lv_indev_t *bsp_display_get_input_dev(void)
@@ -546,12 +684,12 @@ esp_err_t bsp_display_exit_deep_standby(void)
         return ESP_OK;
     }
 
-    ESP_RETURN_ON_ERROR(gpio_set_level(BSP_LCD_RST, 0), TAG,
-                        "display deep-wake reset assert failed");
-    vTaskDelay(pdMS_TO_TICKS(CO5300_DEEP_WAKE_RESET_LOW_MS));
-    ESP_RETURN_ON_ERROR(gpio_set_level(BSP_LCD_RST, 1), TAG,
-                        "display deep-wake reset release failed");
-    vTaskDelay(pdMS_TO_TICKS(CO5300_RESET_RELEASE_MS));
+    /* Cycle RESX through the driver's own reset routine (10ms low, 150ms
+     * high) instead of hand-rolled 5ms/5ms timing: deep standby drops the
+     * panel's internal state and the wake reset needs the same margins the
+     * driver applies at first power-on. */
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_display.panel), TAG,
+                        "display deep-wake reset failed");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_display.panel), TAG,
                         "display reinitialization failed");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_display.panel,

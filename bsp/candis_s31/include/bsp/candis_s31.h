@@ -247,8 +247,12 @@
 /** @} */
 
 /* GPIO26/27/28/30/31/32 are reserved for flash and VDD_SPI (there is no
- * GPIO29). GPIO36, GPIO37, GPIO60, and GPIO61 are boot strapping pins.
- * GPIO41 is not available to applications. */
+ * GPIO29). GPIO36, GPIO37, GPIO60, and GPIO61 are boot strapping pins. EVT1
+ * GPIO36 also drives the active-low TF power switch; R6 (4.7 kOhm) incorrectly
+ * pulls it to the 1.8 V VDD_SPI rail, so R6 must be isolated before power-on
+ * and the next revision must not fit that pull-up. GPIO54-57 are
+ * MTDO/MTCK/MTDI/MTMS and conflict
+ * with camera PCLK/XCLK/VSYNC/HSYNC. GPIO41 is unavailable to applications. */
 
 /** @addtogroup g09_battery
  *  @{
@@ -376,6 +380,10 @@ typedef enum {
     BSP_TYPE_C_ROLE_DRP,
 } bsp_type_c_role_t;
 
+/** Board source policy accepts only USB Type-C default current (500 mA).
+ *  The higher enum values report the attached partner's advertised capability
+ *  through bsp_type_c_status_t.advertised_current; passing them to a board role
+ *  or VBUS API fails with ESP_ERR_NOT_SUPPORTED. */
 typedef enum {
     BSP_TYPE_C_CURRENT_DEFAULT = 0,
     BSP_TYPE_C_CURRENT_1_5_A,
@@ -394,8 +402,12 @@ typedef struct {
     uint8_t interrupt1;
     bool attached;
     bool vbus_ok;
+    bool vbus_safe_0v;
+    bool fault;
+    bool remedy_active;
     uint8_t orientation;
-    bsp_type_c_current_t advertised_current;
+    bsp_type_c_role_t role;
+    bsp_type_c_current_t advertised_current; /**< Current advertised by the attached partner. */
 } bsp_type_c_status_t;
 /** @} */
 
@@ -491,9 +503,25 @@ i2c_master_bus_handle_t bsp_lp_i2c_get_handle(void);
 /** @addtogroup g09_battery
  *  @{
  */
-/** Drive directly controlled domains and optional TG28_SW rails to safe levels. */
+/** Application-owned protocol teardown invoked by bsp_power_safe_state()
+ *  before any GPIO is parked or rail is removed. The callback must release
+ *  active display/audio/camera/storage owners while their supplies are still
+ *  present, must not call bsp_power_safe_state() recursively, and should
+ *  return its first teardown error after attempting all owned peripherals. */
+typedef esp_err_t (*bsp_power_safe_shutdown_cb_t)(void *user_ctx);
+/** Install or clear (callback == NULL) the application shutdown callback.
+ *  Configure it before tasks can call bsp_power_safe_state(). */
+esp_err_t bsp_power_set_safe_shutdown_callback(
+    bsp_power_safe_shutdown_cb_t callback, void *user_ctx);
+/** Best-effort low-level shutdown. The registered application callback runs
+ *  first, then direct domains, optional TG28_SW rails, and back-feed-prone
+ *  GPIOs are handled even when an earlier step fails. Returns the first error.
+ *  Without a registered callback the application remains responsible for
+ *  stopping every active protocol owner before entering this function. */
 esp_err_t bsp_power_safe_state(void);
 esp_err_t bsp_power_domain_set(bsp_power_domain_t domain, bool enable);
+/** Return the last state successfully driven by bsp_power_domain_set(), or
+ *  ESP_ERR_INVALID_STATE when this boot has not driven the domain yet. */
 esp_err_t bsp_power_domain_get(bsp_power_domain_t domain, bool *enabled);
 const char *bsp_power_domain_name(bsp_power_domain_t domain);
 
@@ -501,7 +529,13 @@ const char *bsp_power_domain_name(bsp_power_domain_t domain);
 esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable);
 const char *bsp_peripheral_name(bsp_peripheral_t peripheral);
 
-/** TG28_SW access. Regulator writes are explicit and never performed by init. */
+/** Conservative Type-C1 limit applied by bsp_pmic_init() before other setup. */
+#define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 100
+
+/** TG28_SW access. Init preserves regulator voltage/enable OTP state for the
+ *  boot snapshot but clamps REG16 input current from its 1500 mA POR value to
+ *  BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA. The board API accepts 500 mA only
+ *  after the application has independently verified the connected source. */
 esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
@@ -556,6 +590,9 @@ esp_err_t bsp_rtc_get_status(bsp_rtc_status_t *status);
 esp_err_t bsp_rtc_set_alarm(const bsp_rtc_alarm_t *alarm);
 esp_err_t bsp_rtc_get_alarm(bsp_rtc_alarm_t *out_alarm);
 esp_err_t bsp_rtc_alarm_irq_enable(bool enable);
+/** Report and clear only the RX8130CE alarm flag (AF), leaving UF/TF intact.
+ *  alarm_flag may be NULL when the caller only needs to clear AF. */
+esp_err_t bsp_rtc_get_and_clear_alarm_flag(bool *alarm_flag);
 esp_err_t bsp_rtc_clear_interrupt_flags(uint8_t *flags);
 
 /** Service TG28_SW and RX8130CE until their shared interrupt line is released.
@@ -572,14 +609,21 @@ esp_err_t bsp_shared_irq_register_callback(bsp_shared_irq_callback_t cb, void *a
 /** @addtogroup g07_usb
  *  @{
  */
-/** FUSB303B access. Source role selection does not enable the 5 V boost rail. */
+/** FUSB303B access. Every explicit role selection first clears the 5 V boost
+ *  latch and never re-enables it; bsp_usb_otg_power_set(true, ...) performs
+ *  the only supported Source-before-boost sequence. Native USB Host owns the
+ *  role and boost lifecycle while running, so direct role/power/deinit calls
+ *  then fail with ESP_ERR_INVALID_STATE. Type-C2 only advertises the USB
+ *  500 mA default: other current requests fail with ESP_ERR_NOT_SUPPORTED. */
 esp_err_t bsp_type_c_init(void);
 esp_err_t bsp_type_c_deinit(void);
 esp_err_t bsp_type_c_get_status(bsp_type_c_status_t *status, bool clear_interrupts);
 esp_err_t bsp_type_c_set_role(bsp_type_c_role_t role, bsp_type_c_current_t current);
 esp_err_t bsp_usb_otg_power_set(bool enable, bsp_type_c_current_t current);
 
-/** Install or remove the native USB Host library for the Type-C2 connector. */
+/** Install or remove the native USB Host library for the Type-C2 connector.
+ *  limit_500mA must be true (the only source current this board advertises);
+ *  passing false fails with ESP_ERR_NOT_SUPPORTED. */
 esp_err_t bsp_usb_host_start(bsp_usb_host_power_mode_t mode, bool limit_500mA);
 esp_err_t bsp_usb_host_stop(void);
 /** @} */
@@ -648,6 +692,9 @@ typedef struct {
 
 lv_display_t *bsp_display_start(void);
 lv_display_t *bsp_display_start_with_config(const bsp_display_cfg_t *cfg);
+/** Terminal LVGL teardown: even if an LVGL remove operation fails, all BSP
+ *  handles are invalidated and panel/touch pins and rails are made safe.
+ *  A failed return therefore requires a reboot, not a retry with old handles. */
 esp_err_t bsp_display_stop(void);
 lv_indev_t *bsp_display_get_input_dev(void);
 bool bsp_display_lock(uint32_t timeout_ms);

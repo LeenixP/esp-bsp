@@ -1237,6 +1237,13 @@ enum bsp_type_c_current_t {
 };
 ```
 
+Candis-S31 Type-C2 source mode only advertises the USB 500 mA default.
+`BSP_TYPE_C_CURRENT_1_5_A` and `BSP_TYPE_C_CURRENT_3_0_A` are kept solely to
+report the attached peer's advertised capability through
+`bsp_type_c_status_t.advertised_current`; passing them to
+`bsp_type_c_set_role()` or `bsp_usb_otg_power_set(true, ...)` fails with
+`ESP_ERR_NOT_SUPPORTED`.
+
 ### enum `bsp_type_c_role_t`
 
 ```c
@@ -1255,7 +1262,7 @@ FUSB303B connection snapshot.
 
 Variables:
 
--  bsp\_type\_c\_current\_t advertised_current  
+-  bsp\_type\_c\_current\_t advertised_current
 
 -  bool attached  
 
@@ -1328,6 +1335,11 @@ esp_err_t bsp_type_c_set_role (
 ) 
 ```
 
+Set the FUSB303B role and source current advertisement. Only
+`BSP_TYPE_C_CURRENT_DEFAULT` (500 mA) is accepted for the source advertisement;
+any other current value returns `ESP_ERR_NOT_SUPPORTED` without touching the
+controller.
+
 ### function `bsp_usb_host_start`
 
 ```c
@@ -1339,6 +1351,8 @@ esp_err_t bsp_usb_host_start (
 
 
 Install or remove the native USB Host library for the Type-C2 connector.
+`limit_500mA` must be true: the board only advertises the 500 mA default
+source current, and passing false returns `ESP_ERR_NOT_SUPPORTED`.
 ### function `bsp_usb_host_stop`
 
 ```c
@@ -1355,6 +1369,10 @@ esp_err_t bsp_usb_otg_power_set (
     bsp_type_c_current_t current
 ) 
 ```
+
+Enable or disable the Type-C2 OTG boost rail. Enabling always advertises the
+USB 500 mA default; a non-default `current` fails with
+`ESP_ERR_NOT_SUPPORTED` (validated by `bsp_type_c_set_role()`).
 
 
 
@@ -1845,6 +1863,7 @@ esp_err_t bsp_camera_stop (
 |  esp\_err\_t | [**bsp\_rtc\_clear\_interrupt\_flags**](#function-bsp_rtc_clear_interrupt_flags) (uint8\_t \*flags) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_deinit**](#function-bsp_rtc_deinit) (void) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_get\_alarm**](#function-bsp_rtc_get_alarm) ([**bsp\_rtc\_alarm\_t**](#struct-bsp_rtc_alarm_t) \*out\_alarm) <br> |
+|  esp\_err\_t | [**bsp\_rtc\_get\_and\_clear\_alarm\_flag**](#function-bsp_rtc_get_and_clear_alarm_flag) (bool \*alarm\_flag) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_get\_status**](#function-bsp_rtc_get_status) ([**bsp\_rtc\_status\_t**](#struct-bsp_rtc_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_get\_time**](#function-bsp_rtc_get_time) ([**bsp\_rtc\_time\_t**](#struct-bsp_rtc_time_t) \*time, [**bsp\_rtc\_status\_t**](#struct-bsp_rtc_status_t) \*status) <br> |
 |  esp\_err\_t | [**bsp\_rtc\_init**](#function-bsp_rtc_init) (void) <br> |
@@ -2006,6 +2025,16 @@ esp_err_t bsp_rtc_get_alarm (
 
 
 Read back the RX8130CE alarm compare settings.
+### function `bsp_rtc_get_and_clear_alarm_flag`
+
+```c
+esp_err_t bsp_rtc_get_and_clear_alarm_flag (
+    bool *alarm_flag
+) 
+```
+
+
+Report and clear only the RX8130CE alarm flag (AF), leaving update and timer flags untouched. `alarm_flag` may be `NULL` when the caller only needs to clear AF.
 ### function `bsp_rtc_get_status`
 
 ```c

@@ -59,11 +59,20 @@ rail is OFF after power-on and software must open it explicitly, which is what
 `bsp_pmic_regulator_*` calls must not be used for it. `bsp_led_indicator_create()`
 opens the switch and `bsp_power_safe_state()` closes it again. DLDO2 (DC4SW) is
 an unconnected spare.
-Charger control covers the constant-current limit (0-200mA in 25mA steps,
-then 300-1500mA in 100mA steps), the discrete input current limit
-(100/500/900/1000/1500/2000mA), and the discrete charge termination voltage
-(3900/4000/4100/4200/4350/4400mV). `bsp_pmic_init()` clears any latched
-interrupt status before enabling the power-key interrupts.
+
+The TG28 driver can represent the discrete input-current limits
+(100/500/900/1000/1500/2000mA), but this board has fixed Type-C1 Rd and no Rp
+detector. `bsp_pmic_init()` therefore clamps the input to 100mA before other
+PMIC setup, and the public board API accepts only that baseline or an
+application-verified 500mA stage. Charger control separately covers the
+battery constant-current limit (0-200mA in 25mA steps, then 300-1500mA in
+100mA steps) and the discrete termination voltage
+(3900/4000/4100/4200/4350/4400mV). PMIC init also clears latched interrupt
+status before enabling the power-key interrupts.
+
+`bsp_power_safe_state()` is a low-level best-effort rail/GPIO sweep. Stop
+active display, audio, camera, and USB owners first so they can release handles
+and issue their protocol-level shutdown commands.
 
 ## Third-party notices
 
@@ -136,6 +145,11 @@ The RTC `/IRQ` and the TG28_SW interrupt are wired-ANDed onto
 `bsp_rtc_alarm_irq_enable(true)` is in effect, a latched RTC alarm pulls
 GPIO2 low and keeps it low until the flag is cleared; the line stays low
 while either device has a pending event.
+
+Use `bsp_rtc_get_and_clear_alarm_flag()` when only AF should be acknowledged;
+it leaves the update and timer flags untouched. Use
+`bsp_rtc_clear_interrupt_flags()` or `bsp_shared_irq_service()` when every
+pending RTC source must be reported and cleared to release the shared line.
 
 `bsp_shared_irq_service()` drains both devices over I2C until the line
 releases and reports the combined flags. It can be polled from a task, or

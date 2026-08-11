@@ -185,9 +185,14 @@ esp_err_t fusb303b_set_role(fusb303b_handle_t handle,
                                     FUSB303B_MANUAL_DISABLED);
     }
 
+    /* DISABLED has priority over PORT_ROLE. Keep it asserted until both the
+     * requested current and role are committed, so any failed I2C operation
+     * leaves the CC state machine safely disabled instead of resuming the
+     * previously programmed role. */
     ESP_RETURN_ON_ERROR(fusb303b_update_bits(handle, FUSB303B_REG_MANUAL,
-                        FUSB303B_MANUAL_DISABLED, 0), TAG,
-                        "cannot leave disabled state");
+                        FUSB303B_MANUAL_DISABLED,
+                        FUSB303B_MANUAL_DISABLED), TAG,
+                        "cannot enter disabled state");
     const uint8_t current_value = current == FUSB303B_CURRENT_3_0_A ? 3 :
                                   current == FUSB303B_CURRENT_1_5_A ? 2 : 1;
     ESP_RETURN_ON_ERROR(fusb303b_update_bits(handle, FUSB303B_REG_CONTROL,
@@ -198,8 +203,43 @@ esp_err_t fusb303b_set_role(fusb303b_handle_t handle,
     const uint8_t role_value = role == FUSB303B_ROLE_SINK ? (1U << 1) :
                                role == FUSB303B_ROLE_SOURCE ? (1U << 0) :
                                (1U << 2);
-    return fusb303b_update_bits(handle, FUSB303B_REG_PORT_ROLE,
-                                FUSB303B_PORT_ROLE_MASK, role_value);
+    ESP_RETURN_ON_ERROR(fusb303b_update_bits(handle, FUSB303B_REG_PORT_ROLE,
+                        FUSB303B_PORT_ROLE_MASK, role_value), TAG,
+                        "port role update failed");
+    return fusb303b_update_bits(handle, FUSB303B_REG_MANUAL,
+                                FUSB303B_MANUAL_DISABLED, 0);
+}
+
+esp_err_t fusb303b_get_role(fusb303b_handle_t handle, fusb303b_role_t *role)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && role != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid role output");
+    uint8_t manual = 0;
+    ESP_RETURN_ON_ERROR(fusb303b_read(handle, FUSB303B_REG_MANUAL,
+                                      &manual, sizeof(manual)), TAG,
+                        "manual register read failed");
+    if ((manual & FUSB303B_MANUAL_DISABLED) != 0) {
+        *role = FUSB303B_ROLE_DISABLED;
+        return ESP_OK;
+    }
+
+    uint8_t port_role = 0;
+    ESP_RETURN_ON_ERROR(fusb303b_read(handle, FUSB303B_REG_PORT_ROLE,
+                                      &port_role, sizeof(port_role)), TAG,
+                        "port role register read failed");
+    switch (port_role & FUSB303B_PORT_ROLE_MASK) {
+    case (1U << 1):
+        *role = FUSB303B_ROLE_SINK;
+        return ESP_OK;
+    case (1U << 0):
+        *role = FUSB303B_ROLE_SOURCE;
+        return ESP_OK;
+    case (1U << 2):
+        *role = FUSB303B_ROLE_DRP;
+        return ESP_OK;
+    default:
+        return ESP_ERR_INVALID_RESPONSE;
+    }
 }
 
 esp_err_t fusb303b_get_and_clear_interrupts(fusb303b_handle_t handle,

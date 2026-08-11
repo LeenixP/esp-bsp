@@ -241,15 +241,16 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         return NULL;
     }
     /* Hardware gain values verified against the board schematic rev 0.5,
-     * audio sheet (page 8): the codec AVDD/DVDD/PVDD pins all sit on
-     * AUDIO_3V3_SW, which is TG28 ALDO3 (set to 3.3 V by the audio power-up
-     * in bsp_power.c) through the 0-ohm link R60. The class-D PA (NS4150B,
-     * U23) VCC comes from AUDIO_PA_PVDD_SW, the output of load switch U21
-     * (TPS22917) fed from TG28_VSYS - the TG28 battery/system rail, about
-     * 3.0-4.5 V depending on charge state (TG28 datasheet: VOFF = 2.6 V).
-     * pa_voltage therefore uses 4.2 V (li-ion charge target) rather than the
-     * 5.0 V copied from esp32_s31_korvo_1. Both values only feed the
-     * esp_codec_dev hardware-gain dB math
+     * audio sheet (page 8): the codec U19 AVDD/DVDD/PVDD pins and microphones
+     * U21/U23 all sit directly on AUDIO_3V3_SW, which is TG28 ALDO3 (set to
+     * 3.3 V by the audio power-up in bsp_power.c). R60 is only the AGND-to-GND
+     * single-point link. The class-D PA (NS4150B, U22) VCC comes from
+     * AUDIO_PA_PVDD_SW, the output of load switch U20 (TPS22917) fed from
+     * TG28_VSYS - the TG28 battery/system rail, about 3.0-4.5 V depending
+     * on charge state (the TG28 datasheet specifies a 2.6 V VOFF threshold).
+     * pa_voltage therefore uses 4.2 V (the nominal Li-ion charge target)
+     * rather than the 5.0 V copied from esp32_s31_korvo_1. Both values only
+     * feed the esp_codec_dev hardware-gain dB math
      * (esp_codec_dev_col_calc_hw_gain: 20*log10(dac/pa)), not the analog
      * path itself. */
     const esp_codec_dev_hw_gain_t gain = {

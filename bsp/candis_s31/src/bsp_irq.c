@@ -48,11 +48,12 @@ static esp_err_t shared_irq_gpio_init(void)
 
 /* Unmask the level interrupt again after servicing, but only while a
  * callback is registered; the ISR masks it on every notification. */
-static void shared_irq_rearm(void)
+static esp_err_t shared_irq_rearm(void)
 {
-    if (s_callback != NULL) {
-        gpio_intr_enable(BSP_PMIC_RTC_INT);
+    if (s_callback == NULL) {
+        return ESP_OK;
     }
+    return gpio_intr_enable(BSP_PMIC_RTC_INT);
 }
 
 esp_err_t bsp_shared_irq_service(bsp_shared_irq_status_t *status)
@@ -60,16 +61,31 @@ esp_err_t bsp_shared_irq_service(bsp_shared_irq_status_t *status)
     ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "status is NULL");
     memset(status, 0, sizeof(*status));
 
+    /* A failed setup means the ISR cannot have masked the line yet, so there
+     * is nothing to re-arm: leave the interrupt alone and report the error. */
     ESP_RETURN_ON_ERROR(shared_irq_gpio_init(), TAG,
                         "shared IRQ GPIO setup failed");
 
+    esp_err_t first_error = ESP_OK;
     for (unsigned pass = 0; pass < SHARED_IRQ_MAX_SERVICE_PASSES; ++pass) {
         uint8_t pmic[3] = {0};
         uint8_t rtc = 0;
-        ESP_RETURN_ON_ERROR(bsp_pmic_get_and_clear_interrupts(pmic), TAG,
-                            "TG28_SW interrupt service failed");
-        ESP_RETURN_ON_ERROR(bsp_rtc_clear_interrupt_flags(&rtc), TAG,
-                            "RX8130CE interrupt service failed");
+        const esp_err_t pmic_error = bsp_pmic_get_and_clear_interrupts(pmic);
+        if (pmic_error != ESP_OK) {
+            if (first_error == ESP_OK) {
+                first_error = pmic_error;
+            }
+            ESP_LOGE(TAG, "TG28_SW interrupt service failed: %s",
+                     esp_err_to_name(pmic_error));
+        }
+        const esp_err_t rtc_error = bsp_rtc_clear_interrupt_flags(&rtc);
+        if (rtc_error != ESP_OK) {
+            if (first_error == ESP_OK) {
+                first_error = rtc_error;
+            }
+            ESP_LOGE(TAG, "RX8130CE interrupt service failed: %s",
+                     esp_err_to_name(rtc_error));
+        }
         for (size_t index = 0; index < sizeof(pmic); ++index) {
             status->pmic[index] |= pmic[index];
         }
@@ -77,15 +93,28 @@ esp_err_t bsp_shared_irq_service(bsp_shared_irq_status_t *status)
         status->service_passes = pass + 1;
         if (gpio_get_level(BSP_PMIC_RTC_INT) != BSP_PMIC_RTC_INT_ACTIVE_LEVEL) {
             status->line_released = true;
-            shared_irq_rearm();
-            return ESP_OK;
+            break;
         }
     }
 
+    /* The ISR masked the line on entry, so re-arm it on every exit path: a
+     * failed I2C transaction must not disable the shared interrupt forever.
+     * A still-asserted line re-fires immediately and the next service pass
+     * retries the failed device. */
+    const esp_err_t rearm_error = shared_irq_rearm();
+    if (rearm_error != ESP_OK) {
+        ESP_LOGE(TAG, "shared IRQ re-arm failed: %s",
+                 esp_err_to_name(rearm_error));
+    }
+    if (first_error != ESP_OK) {
+        return first_error;
+    }
+    if (rearm_error != ESP_OK) {
+        return rearm_error;
+    }
     /* The line is still asserted after all passes: something remains
-     * pending, so re-arming notifies the task again right away. */
-    shared_irq_rearm();
-    return ESP_ERR_TIMEOUT;
+     * pending; the re-arm above notifies the task again right away. */
+    return status->line_released ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 esp_err_t bsp_shared_irq_register_callback(bsp_shared_irq_callback_t cb,
