@@ -70,10 +70,17 @@ esp_err_t bsp_led_indicator_create(led_indicator_handle_t led_array[],
         *led_cnt = 0;
     }
     for (int index = 0; index < BSP_LED_NUM; ++index) {
-        ESP_RETURN_ON_ERROR(led_indicator_new_strips_device(&s_indicator_config,
-                            &s_rgb_config,
-                            &led_array[index]),
-                            TAG, "RGB LED creation failed");
+        const esp_err_t led_error =
+            led_indicator_new_strips_device(&s_indicator_config,
+                                &s_rgb_config,
+                                &led_array[index]);
+        if (led_error != ESP_OK) {
+            /* Roll back the DC1SW switch so a failed init does not leave
+             * the RGB LED rail powered with no active consumer. */
+            (void)bsp_pmic_switch_enable(BSP_PMIC_SWITCH_DC1SW, false);
+            ESP_LOGE(TAG, "RGB LED creation failed: %s", esp_err_to_name(led_error));
+            return led_error;
+        }
         if (led_cnt != NULL) {
             ++(*led_cnt);
         }
