@@ -247,12 +247,17 @@
 /** @} */
 
 /* GPIO26/27/28/30/31/32 are reserved for flash and VDD_SPI (there is no
- * GPIO29). GPIO36, GPIO37, GPIO60, and GPIO61 are boot strapping pins. EVT1
- * GPIO36 also drives the active-low TF power switch; R6 (4.7 kOhm) incorrectly
- * pulls it to the 1.8 V VDD_SPI rail, so R6 must be isolated before power-on
- * and the next revision must not fit that pull-up. GPIO54-57 are
- * MTDO/MTCK/MTDI/MTMS and conflict
- * with camera PCLK/XCLK/VSYNC/HSYNC. GPIO41 is unavailable to applications. */
+ * GPIO29). GPIO36, GPIO37, GPIO60, and GPIO61 are boot strapping pins.
+ * GPIO36 is the VDD_SPI voltage strap (ESP32-S31 datasheet Table 3-4:
+ * high = 3.3 V flash, low = 1.8 V flash). This board uses a 3.3 V
+ * off-package W25Q128 flash, so VDD_SPI = 3.3 V and GPIO36 must sample
+ * high at reset; ESP32-S31 v0.0 erratum SPI-855 also forbids 1.8 V
+ * VDD_SPI flash boot. R6 (10 kOhm to VCC_3V3_MAIN) is the required
+ * strap pull-up, not an error. GPIO36 also drives the active-low TF power
+ * switch; firmware keeps it high (TF off) until an explicit post-boot
+ * sdcard power-on, so the strap sample is never disturbed. GPIO54-57 are
+ * MTDO/MTCK/MTDI/MTMS and conflict with camera PCLK/XCLK/VSYNC/HSYNC.
+ * GPIO41 is unavailable to applications. */
 
 /** @addtogroup g09_battery
  *  @{

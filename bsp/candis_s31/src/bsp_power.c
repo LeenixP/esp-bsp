@@ -183,7 +183,14 @@ static esp_err_t camera_control_pins(void)
 {
     ESP_RETURN_ON_ERROR(configure_output(BSP_CAMERA_PWDN, 1), TAG,
                         "camera PWDN config failed");
-    return configure_output(BSP_CAMERA_RST, 0);
+    const esp_err_t rst_error = configure_output(BSP_CAMERA_RST, 0);
+    if (rst_error != ESP_OK) {
+        /* Roll back PWDN to a floating input so a partially-configured
+         * state is never left on the sensor pads. */
+        const gpio_num_t pwdn_pin[] = { BSP_CAMERA_PWDN };
+        (void)tristate_pins(pwdn_pin, sizeof(pwdn_pin) / sizeof(pwdn_pin[0]));
+    }
+    return rst_error;
 }
 
 esp_err_t bsp_power_set_safe_shutdown_callback(

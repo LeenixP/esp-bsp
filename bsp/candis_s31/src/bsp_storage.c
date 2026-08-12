@@ -86,22 +86,26 @@ esp_err_t bsp_sdcard_sdmmc_mount(bsp_sdcard_cfg_t *cfg)
         .max_files = 5,
         .allocation_unit_size = 16 * 1024,
     };
+    /* Use stack-local defaults when the caller did not supply them, but never
+     * write the stack addresses back into cfg: that would leave dangling
+     * pointers after this function returns. Resolve the effective pointers
+     * here and pass them directly to the mount call. */
     if (cfg->host == NULL) {
         bsp_sdcard_get_sdmmc_host(SDMMC_HOST_SLOT_0, &host);
-        cfg->host = &host;
     }
     if (cfg->slot.sdmmc == NULL) {
         bsp_sdcard_sdmmc_get_slot(SDMMC_HOST_SLOT_0, &slot);
-        cfg->slot.sdmmc = &slot;
     }
-    if (cfg->mount == NULL) {
-        cfg->mount = &mount;
-    }
+    const sdmmc_host_t *const use_host = cfg->host != NULL ? cfg->host : &host;
+    const sdmmc_slot_config_t *const use_slot =
+        cfg->slot.sdmmc != NULL ? cfg->slot.sdmmc : &slot;
+    const esp_vfs_fat_sdmmc_mount_config_t *const use_mount =
+        cfg->mount != NULL ? cfg->mount : &mount;
 
     ESP_RETURN_ON_ERROR(bsp_peripheral_power_set(BSP_PERIPHERAL_SDCARD, true),
                         TAG, "SD card power-up failed");
-    esp_err_t error = esp_vfs_fat_sdmmc_mount(BSP_SD_MOUNT_POINT, cfg->host,
-                      cfg->slot.sdmmc, cfg->mount, &s_card);
+    esp_err_t error = esp_vfs_fat_sdmmc_mount(BSP_SD_MOUNT_POINT, use_host,
+                      use_slot, use_mount, &s_card);
     if (error != ESP_OK) {
         s_card = NULL;
         bsp_peripheral_power_set(BSP_PERIPHERAL_SDCARD, false);
