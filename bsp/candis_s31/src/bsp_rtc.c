@@ -51,7 +51,7 @@ esp_err_t bsp_rtc_init(void)
     /* Candis-S31 carries a primary (non-rechargeable) backup cell on VBAT:
      * enable automatic supply switchover but never charge the cell. */
     const rx8130ce_config_t config = {
-        .device_address = RX8130CE_I2C_ADDRESS_DEFAULT,
+        .device_address = BSP_RX8130CE_I2C_ADDRESS,
         .scl_speed_hz = RX8130CE_I2C_CLOCK_HZ,
         .backup_charge_enable = false,
     };

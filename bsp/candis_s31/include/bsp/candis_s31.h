@@ -244,6 +244,9 @@
 #define BSP_RX8130CE_I2C_ADDRESS               0x32
 #define BSP_FUSB303B_I2C_ADDRESS_LOW           0x21
 #define BSP_FUSB303B_I2C_ADDRESS_HIGH          0x31
+/* Addresses above are 7-bit wire addresses. The ES8389 codec is addressed
+ * through esp_codec_dev, which takes its 8-bit write address 0x20
+ * (ES8389_CODEC_DEFAULT_ADDR); on the wire it answers at 7-bit 0x10. */
 /** @} */
 
 /* GPIO26/27/28/30/31/32 are reserved for flash and VDD_SPI (there is no
