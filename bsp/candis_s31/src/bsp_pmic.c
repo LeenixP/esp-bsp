@@ -9,12 +9,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <string.h>
+
 #include "tg28_sw.h"
 
 #include "bsp/candis_s31.h"
 
 static const char *TAG = "candis_pmic";
 static tg28_sw_handle_t s_pmic;
+static uint8_t s_boot_irq_snapshot[3];
+static bool s_boot_irq_valid;
 
 _Static_assert((int)BSP_PMIC_REGULATOR_COUNT == (int)TG28_SW_REGULATOR_COUNT,
                "BSP and TG28_SW regulator lists must stay aligned");
@@ -74,9 +78,16 @@ esp_err_t bsp_pmic_init(void)
         /* Clear any latched interrupt status before enabling the power-key
          * IRQs, like the vendor axp-core driver does at irq-chip init
          * (write 1 to clear every pending bit), so stale events from the
-         * boot ROM or a previous reset do not fire immediately. */
+         * boot ROM or a previous reset do not fire immediately.
+         * Keep a snapshot for post-mortem diagnosis: events latched before
+         * this clear (e.g. an over-current lockout that killed the SoC while
+         * the TG28 stayed alive) are otherwise lost forever. */
         uint8_t pending[3] = {0};
         error = tg28_sw_get_and_clear_interrupts(s_pmic, pending);
+        if (error == ESP_OK) {
+            memcpy(s_boot_irq_snapshot, pending, sizeof(s_boot_irq_snapshot));
+            s_boot_irq_valid = true;
+        }
     }
     if (error == ESP_OK) {
         error = tg28_sw_configure_power_key_interrupts(s_pmic,
@@ -156,12 +167,27 @@ esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps)
 esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps)
 {
     /* With fixed Rd and no Rp detector the board cannot prove a 1.5 A/3 A
-     * source. Keep the public board API within legacy/default USB bounds. */
-    ESP_RETURN_ON_FALSE(milliamps == 100 || milliamps == 500,
-                        ESP_ERR_NOT_SUPPORTED, TAG,
-                        "only 100 mA or verified 500 mA input is supported");
+     * source. 100 mA stays the only unattended default; any higher hardware
+     * level is accepted here only because callers must have independently
+     * verified the connected source (factory console: source_verified token,
+     * current probe, VBUS droop watch). EVT note: WiFi full RF calibration
+     * exceeded the 500 mA stage on EVT1, so 900/1000/1500/2000 are enabled
+     * for diagnosis; keep 100 mA as the shipping baseline. */
+    switch (milliamps) {
+    case 100: case 500: case 900: case 1000: case 1500: case 2000:
+        break;
+    default:
+        ESP_RETURN_ON_FALSE(false, ESP_ERR_NOT_SUPPORTED, TAG,
+                            "unsupported input limit %u mA", milliamps);
+    }
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_set_input_current_limit(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_get_power_off_source(uint8_t *source)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_power_off_source(s_pmic, source);
 }
 
 esp_err_t bsp_pmic_get_input_current_limit(uint16_t *milliamps)
@@ -241,6 +267,19 @@ esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3])
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_get_and_clear_interrupts(s_pmic, status);
+}
+
+esp_err_t bsp_pmic_get_boot_irq_snapshot(uint8_t status[3], bool *valid)
+{
+    ESP_RETURN_ON_FALSE(status != NULL && valid != NULL, ESP_ERR_INVALID_ARG,
+                        TAG, "status/valid is NULL");
+    /* Only meaningful on a boot where bsp_pmic_init() ran; the snapshot was
+     * captured before the init-time clear, so it preserves events latched
+     * across an SoC power collapse. */
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    memcpy(status, s_boot_irq_snapshot, sizeof(s_boot_irq_snapshot));
+    *valid = s_boot_irq_valid;
+    return ESP_OK;
 }
 
 const char *bsp_pmic_regulator_name(bsp_pmic_regulator_t regulator)

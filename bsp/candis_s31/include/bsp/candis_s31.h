@@ -537,8 +537,12 @@ const char *bsp_power_domain_name(bsp_power_domain_t domain);
 esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable);
 const char *bsp_peripheral_name(bsp_peripheral_t peripheral);
 
-/** Conservative Type-C1 limit applied by bsp_pmic_init() before other setup. */
-#define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 100
+/** EVT workaround: with no battery fitted, VSYS depends entirely on the
+ *  VBUS->VMID input path, which starves RF bursts at low input-current
+ *  limits (VMID dips -> DCDC1 input collapse -> SoC dies). Clamp to
+ *  500 mA (USB 2.0 negotiated level) at boot; restore 100 mA once the
+ *  DVT board adds VMID reservoir capacitance. */
+#define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 500
 
 /** TG28_SW access. Init preserves regulator voltage/enable OTP state for the
  *  boot snapshot but clamps REG16 input current from its 1500 mA POR value to
@@ -548,6 +552,12 @@ esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
 esp_err_t bsp_pmic_get_power_on_source(uint8_t *source);
+
+/** Read the TG28_SW REG21 power-off-source latch. The register survives while
+ *  the TG28 stays supplied (VBUS or battery), so after an unexpected system
+ *  power cut the SoC must be revived with the PWRON key WITHOUT unplugging
+ *  VBUS, then this read reveals whether the TG28 itself commanded the off. */
+esp_err_t bsp_pmic_get_power_off_source(uint8_t *source);
 
 /** Power off the board through the TG28_SW soft-PWROFF command (REG10 bit0).
  *  The PMU enters its off state as soon as the write is acknowledged: every
@@ -576,6 +586,13 @@ esp_err_t bsp_pmic_switch_is_enabled(bsp_pmic_switch_t sw, bool *enabled);
 const char *bsp_pmic_switch_name(bsp_pmic_switch_t sw);
 
 esp_err_t bsp_pmic_get_and_clear_interrupts(uint8_t status[3]);
+
+/** Copy the IRQ status snapshot captured at bsp_pmic_init() time, before the
+ *  init-time clear. This preserves events latched across an SoC power
+ *  collapse (e.g. a regulator over-current lockout that killed 3V3 while the
+ *  TG28 stayed alive on VBUS). *valid is false if the snapshot was never
+ *  captured. */
+esp_err_t bsp_pmic_get_boot_irq_snapshot(uint8_t status[3], bool *valid);
 const char *bsp_pmic_regulator_name(bsp_pmic_regulator_t regulator);
 
 /** Read one TG28_SW ADC channel in millivolts. The TDIE channel reports the
