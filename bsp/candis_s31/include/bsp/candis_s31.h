@@ -537,17 +537,20 @@ const char *bsp_power_domain_name(bsp_power_domain_t domain);
 esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable);
 const char *bsp_peripheral_name(bsp_peripheral_t peripheral);
 
-/** EVT workaround: with no battery fitted, VSYS depends entirely on the
- *  VBUS->VMID input path, which starves RF bursts at low input-current
- *  limits (VMID dips -> DCDC1 input collapse -> SoC dies). Clamp to
- *  500 mA (USB 2.0 negotiated level) at boot; restore 100 mA once the
- *  DVT board adds VMID reservoir capacitance. */
+/** Board default input-current limit, applied unattended at boot. With no
+ *  battery fitted, VSYS depends entirely on the VBUS->VMID input path,
+ *  which starves RF bursts at 100 mA (VMID dips -> DCDC1 input collapse
+ *  -> SoC dies; EVT1 incident 2026-08-17). 500 mA (USB 2.0 negotiated
+ *  level) is the shipping default for this board, stress-verified from
+ *  fresh RESET boots; this is the accepted final setting, not a
+ *  temporary workaround. */
 #define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 500
 
 /** TG28_SW access. Init preserves regulator voltage/enable OTP state for the
- *  boot snapshot but clamps REG16 input current from its 1500 mA POR value to
- *  BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA. The board API accepts 500 mA only
- *  after the application has independently verified the connected source. */
+ *  boot snapshot but clamps REG16 input current from its 1500 mA POR value
+ *  to BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA. Runtime requests above that
+ *  default are accepted only from callers that have independently verified
+ *  the connected source. */
 esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);

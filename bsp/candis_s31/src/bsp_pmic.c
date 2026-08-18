@@ -167,12 +167,11 @@ esp_err_t bsp_pmic_get_charge_current(uint16_t *milliamps)
 esp_err_t bsp_pmic_set_input_current_limit(uint16_t milliamps)
 {
     /* With fixed Rd and no Rp detector the board cannot prove a 1.5 A/3 A
-     * source. 100 mA stays the only unattended default; any higher hardware
-     * level is accepted here only because callers must have independently
-     * verified the connected source (factory console: source_verified token,
-     * current probe, VBUS droop watch). EVT note: WiFi full RF calibration
-     * exceeded the 500 mA stage on EVT1, so 900/1000/1500/2000 are enabled
-     * for diagnosis; keep 100 mA as the shipping baseline. */
+     * source, so levels above the 500 mA boot default are accepted here
+     * only because callers must have independently verified the connected
+     * source (factory console: source_verified token, current probe, VBUS
+     * droop watch). 100 mA remains selectable for lab use but starves RF
+     * bursts on this board; 900/1000/1500/2000 exist for diagnosis. */
     switch (milliamps) {
     case 100: case 500: case 900: case 1000: case 1500: case 2000:
         break;
