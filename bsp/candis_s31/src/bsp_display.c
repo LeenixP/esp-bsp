@@ -101,7 +101,6 @@ static const co5300_lcd_init_cmd_t s_panel_init[] = {
     {0xFE, (uint8_t[]){0x00}, 1, 0},
     {0xC4, (uint8_t[]){0x80}, 1, 0},
     {0x3A, (uint8_t[]){0x55}, 1, 0},
-    {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
     /* WRDISBV capped at the EVT first-light level; 0x51 percent scaling is
      * percent * 255 / 100. bsp_display_brightness_set() owns later changes. */
@@ -110,7 +109,10 @@ static const co5300_lcd_init_cmd_t s_panel_init[] = {
     /* The active 460-pixel window starts at column 10. */
     {0x2A, (uint8_t[]){0x00, 0x0A, 0x01, 0xD5}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xCB}, 4, 0},
-    {0x11, NULL, 0, 60},
+    {0x11, NULL, 0, CO5300_SLEEP_TRANSITION_MS},
+    /* SLPOUT reloads command defaults during its first 5 ms. Enable TE only
+     * after the 120 ms wake transition so GPIO16 actually emits Mode 1. */
+    {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x29, NULL, 0, 0},
 };
 
@@ -208,6 +210,9 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config,
         CO5300_PANEL_IO_QSPI_CONFIG(BSP_LCD_CS, NULL, NULL);
     io_config.pclk_hz = BSP_LCD_PIXEL_CLOCK_HZ;
     io_config.trans_queue_depth = 10;
+    /* Avoid per-chunk internal bounce buffers when an application selects
+     * full-screen LVGL buffers in PSRAM. Internal-RAM buffers are unchanged. */
+    io_config.flags.psram_dma_direct = 1;
     error = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)BSP_LCD_SPI_NUM,
                                      &io_config, &s_display.io);
     if (error != ESP_OK) {
@@ -249,10 +254,10 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config,
     }
 
     /* TE is routed from the panel to GPIO16 through R55 (0 ohm) and tearing
-     * output is enabled by the init sequence (0x35). Nothing consumes the
-     * signal yet: the QSPI path has no anti-tearing support. Keep the pin as
-     * a pulled-down input so it has a defined level and stays available for a
-     * future consumer. */
+     * output is enabled by the init sequence (0x35). With
+     * CONFIG_BSP_LCD_TE_SYNC the LVGL port owns the pin's interrupt and
+     * gates every refresh cycle on it; this gpio_config only keeps the pin
+     * at a defined level for raw (non-LVGL) panel users. */
     const gpio_config_t te_gpio_config = {
         .pin_bit_mask = BIT64(BSP_LCD_TE),
         .mode = GPIO_MODE_INPUT,
@@ -454,8 +459,7 @@ esp_lcd_touch_handle_t bsp_touch_get_handle(void)
 static lv_display_t *display_lvgl_init(const bsp_display_cfg_t *config)
 {
     const bsp_display_config_t panel_config = {
-        .max_transfer_sz = (int)(BSP_LCD_H_RES *CONFIG_BSP_LCD_DRAW_BUF_HEIGHT *
-                                 sizeof(uint16_t)),
+        .max_transfer_sz = (int)(config->buffer_size * sizeof(uint16_t)),
     };
     if (bsp_display_new(&panel_config, &s_display.panel, &s_display.io) != ESP_OK) {
         return NULL;
@@ -472,18 +476,28 @@ static lv_display_t *display_lvgl_init(const bsp_display_cfg_t *config)
         .hres = BSP_LCD_H_RES,
         .vres = BSP_LCD_V_RES,
         .monochrome = false,
+        .te_gpio_num = BSP_LCD_TE,
         .rotation = {
             .swap_xy = false,
             .mirror_x = false,
             .mirror_y = false,
         },
+#if LVGL_VERSION_MAJOR >= 9
+        /* Render in the CO5300 byte order so neither PARTIAL nor DIRECT mode
+         * spends CPU time swapping every flushed pixel. */
+        .color_format = BSP_LCD_BIGENDIAN ? LV_COLOR_FORMAT_RGB565_SWAPPED : LV_COLOR_FORMAT_RGB565,
+#endif
         .flags = {
             .buff_dma = config->flags.buff_dma,
             .buff_spiram = config->flags.buff_spiram,
 #if LVGL_VERSION_MAJOR >= 9
-            .swap_bytes = BSP_LCD_BIGENDIAN,
+            .swap_bytes = false,
 #endif
             .sw_rotate = config->flags.sw_rotate,
+            .direct_mode = config->flags.direct_mode,
+#if CONFIG_BSP_LCD_TE_SYNC
+            .te_sync = true,
+#endif
         },
     };
     return lvgl_port_add_disp(&display_config);
@@ -491,8 +505,21 @@ static lv_display_t *display_lvgl_init(const bsp_display_cfg_t *config)
 
 lv_display_t *bsp_display_start(void)
 {
-    const bsp_display_cfg_t config = {
+    bsp_display_cfg_t config = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
+#if CONFIG_BSP_LCD_DIRECT_MODE
+        /* Optional full-frame DIRECT path for applications that require a
+         * persistent framebuffer. The normal PARTIAL path below has lower
+         * latency and pipelines rendering with QSPI DMA. */
+        .buffer_size = BSP_LCD_H_RES * BSP_LCD_V_RES,
+        .double_buffer = false,
+        .flags = {
+            .buff_dma = true,
+            .buff_spiram = true,
+            .sw_rotate = false,
+            .direct_mode = true,
+        },
+#else
         .buffer_size = BSP_LCD_H_RES * CONFIG_BSP_LCD_DRAW_BUF_HEIGHT,
 #if CONFIG_BSP_LCD_DRAW_BUF_DOUBLE
         .double_buffer = true,
@@ -503,8 +530,15 @@ lv_display_t *bsp_display_start(void)
             .buff_dma = true,
             .buff_spiram = false,
             .sw_rotate = false,
+            .direct_mode = false,
         },
+#endif
     };
+    /* A 1 ms LVGL timebase keeps animation phases and interrupt-driven touch
+     * handling responsive; priority 5 keeps UI work ahead of normal factory
+     * tasks without outranking system-critical services. */
+    config.lvgl_port_cfg.timer_period_ms = 1;
+    config.lvgl_port_cfg.task_priority = 5;
     return bsp_display_start_with_config(&config);
 }
 
@@ -624,6 +658,11 @@ esp_err_t bsp_display_enter_sleep(void)
 {
     ESP_RETURN_ON_FALSE(s_display.panel != NULL, ESP_ERR_INVALID_STATE, TAG,
                         "display is not initialized");
+    /* SLPIN stops the panel TE output; suspend the TE gate first so LVGL
+     * flushes fall back to unsynchronized writes instead of timing out. */
+    if (s_lvgl_display != NULL) {
+        lvgl_port_display_te_sync_enable(s_lvgl_display, false);
+    }
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "display off failed");
     if (s_touch != NULL) {
         const esp_err_t touch_error = esp_lcd_touch_enter_sleep(s_touch);
@@ -649,6 +688,10 @@ esp_err_t bsp_display_exit_sleep(void)
                         NULL, 0),
                         TAG, "display sleep-out failed");
     vTaskDelay(pdMS_TO_TICKS(CO5300_SLEEP_TRANSITION_MS));
+    /* SLPOUT restarts the panel TE output; re-arm the sync gate. */
+    if (s_lvgl_display != NULL) {
+        lvgl_port_display_te_sync_enable(s_lvgl_display, true);
+    }
     if (s_touch != NULL) {
         const esp_err_t touch_error = esp_lcd_touch_exit_sleep(s_touch);
         if (touch_error != ESP_OK && touch_error != ESP_ERR_NOT_SUPPORTED) {
@@ -702,6 +745,10 @@ esp_err_t bsp_display_exit_deep_standby(void)
         }
     }
     s_deep_standby = false;
+    /* The panel re-initialization above re-enabled TE output (0x35). */
+    if (s_lvgl_display != NULL) {
+        lvgl_port_display_te_sync_enable(s_lvgl_display, true);
+    }
     return bsp_display_backlight_on();
 }
 #endif

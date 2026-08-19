@@ -33,8 +33,24 @@ menu "Board Support Package (Candis-S31)"
     menu "Display"
         config BSP_LCD_PIXEL_CLOCK_MHZ
             int "CO5300 QSPI clock (MHz)"
-            default 40
-            range 10 40
+            default 48
+            range 10 50
+            help
+                CO5300 datasheet limits the 4-wire QSPI write clock to 50 MHz.
+                48 MHz is the highest frequency the ESP32-S31 SPI clock
+                generator produces exactly (BBPLL 480 MHz / 10) within that
+                limit. Values above 40 MHz route over the GPIO matrix on
+                this pinout; validate signal integrity on new board spins.
+
+        config BSP_LCD_TE_SYNC
+            bool "Synchronize LVGL flushes with the panel TE signal"
+            default y
+            help
+                Gates the first transfer of every LVGL refresh cycle on the
+                CO5300 tearing-effect edge (GPIO16). All PARTIAL chunks in the
+                same cycle then stream back-to-back, allowing LVGL rendering
+                and QSPI DMA to overlap. A transfer that lasts longer than one
+                panel scan can still cross the scan position.
 
         config BSP_LCD_DRAW_BUF_HEIGHT
             int "LVGL draw buffer height"
@@ -44,6 +60,17 @@ menu "Board Support Package (Candis-S31)"
         config BSP_LCD_DRAW_BUF_DOUBLE
             bool "Use two LVGL draw buffers"
             default y
+
+        config BSP_LCD_DIRECT_MODE
+            bool "Full-frame PSRAM DIRECT rendering with per-cycle TE-gated flush"
+            default n
+            help
+                Uses one full-frame (460x460) LVGL buffer in PSRAM and the
+                LVGL DIRECT render mode. Dirty areas in a refresh cycle are
+                joined into one full-width, TE-gated band. This preserves a
+                persistent framebuffer but serializes rendering behind the
+                previous transfer; the default double-buffered PARTIAL mode
+                is normally faster. Requires CONFIG_BSP_LCD_TE_SYNC.
     endmenu
 
     menu "Storage"

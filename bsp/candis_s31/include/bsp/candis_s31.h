@@ -715,6 +715,7 @@ typedef struct {
         unsigned int buff_dma : 1;
         unsigned int buff_spiram : 1;
         unsigned int sw_rotate : 1;
+        unsigned int direct_mode : 1; /*!< Full-frame buffers, DIRECT render, per-cycle TE-gated band flush */
     } flags;
 } bsp_display_cfg_t;
 
