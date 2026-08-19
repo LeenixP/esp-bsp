@@ -74,6 +74,10 @@ target_link_libraries(${COMPONENT_TARGET} PUBLIC idf::esp_lcd ${lvgl_iface})
 idf_component_include(esp_timer)
 target_link_libraries(${COMPONENT_TARGET} PRIVATE idf::esp_timer)
 
+# Private dep: GPIO driver (TE sync interrupt)
+idf_component_include(esp_driver_gpio)
+target_link_libraries(${COMPONENT_TARGET} PRIVATE idf::esp_driver_gpio)
+
 # Target-specific: ESP32-P4 picks up the PPA driver.
 idf_build_get_property(target IDF_TARGET)
 if(${target} STREQUAL "esp32p4")

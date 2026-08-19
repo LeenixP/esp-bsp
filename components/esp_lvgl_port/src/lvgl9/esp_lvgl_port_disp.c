@@ -16,6 +16,8 @@
 #include "esp_idf_version.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_timer.h"
+#include "driver/gpio.h"
 #include "esp_lvgl_port.h"
 #include "esp_lvgl_port_priv.h"
 
@@ -51,6 +53,10 @@
 
 static const char *TAG = "LVGL";
 
+/* Max time a refresh cycle may block on the TE edge before flushing
+ * unsynchronized (covers panels that stop TE output while sleeping). */
+#define LVGL_PORT_TE_SYNC_TIMEOUT_MS  100
+
 /*******************************************************************************
 * Types definitions
 *******************************************************************************/
@@ -67,6 +73,20 @@ typedef struct {
     lv_display_rotation_t     current_rotation;
     SemaphoreHandle_t         trans_sem;      /* Idle transfer mutex */
     lvgl_port_rounder_cb_t    rounder_cb;     /* Rounder callback for display area */
+    SemaphoreHandle_t         te_sem;         /* TE edge semaphore (NULL when TE sync is not configured) */
+    int                       te_gpio_num;    /* TE input GPIO (-1 when unused) */
+    volatile bool             te_sync_enabled; /* Runtime gate; cleared while the panel stops its TE output */
+    volatile bool             te_wait_pending; /* Next flush starts a new refresh cycle and must wait for TE */
+    portMUX_TYPE              te_observer_mux; /* Serializes observer callbacks with registration/removal */
+    lvgl_port_te_observer_cb_t te_observer_cb; /* Optional ISR-context edge observer */
+    void                      *te_observer_ctx;
+    /* DIRECT mode on GRAM-type panels (disp_type OTHER): dirty areas of the
+     * ongoing refresh cycle are joined here and transmitted once per cycle. */
+    lv_area_t                 cycle_area;   /* Joined dirty area of the ongoing refresh cycle */
+    bool                      cycle_area_valid;
+    /* Frame timing stamps for the DIRECT band path diagnostics. */
+    volatile int64_t          last_tx_start_us; /* Band DMA start (flush task ctx) */
+    volatile int64_t          last_tx_done_us;  /* Band DMA done (ISR ctx) */
 #if LVGL_PORT_PPA
     lvgl_port_ppa_handle_t    ppa_handle;
 #endif //LVGL_PORT_PPA
@@ -87,6 +107,7 @@ static lv_display_t *lvgl_port_add_disp_priv(const lvgl_port_display_cfg_t *disp
 #if LVGL_PORT_HANDLE_FLUSH_READY
 static bool lvgl_port_flush_io_ready_callback(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata,
         void *user_ctx);
+static void lvgl_port_flush_wait_callback(lv_display_t *drv);
 #if (SOC_LCDCAM_RGB_LCD_SUPPORTED && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0))
 static bool lvgl_port_flush_rgb_vsync_ready_callback(esp_lcd_panel_handle_t panel_io,
         const esp_lcd_rgb_panel_event_data_t *edata, void *user_ctx);
@@ -102,6 +123,19 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
 static void lvgl_port_disp_size_update_callback(lv_event_t *e);
 static void lvgl_port_disp_rotation_update(lvgl_port_display_ctx_t *disp_ctx);
 static void lvgl_port_display_invalidate_callback(lv_event_t *e);
+static void lvgl_port_te_isr(void *arg);
+
+/* Block until the next TE rising edge so the following GRAM write starts
+ * while the panel scan sits in the vertical porch. A stale latched edge is
+ * discarded first: only a fresh edge guarantees the scan position. On
+ * timeout (panel asleep, TE stuck) the flush proceeds unsynchronized. */
+static void lvgl_port_te_wait(lvgl_port_display_ctx_t *disp_ctx)
+{
+    xSemaphoreTake(disp_ctx->te_sem, 0);
+    if (xSemaphoreTake(disp_ctx->te_sem, pdMS_TO_TICKS(LVGL_PORT_TE_SYNC_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGD(TAG, "TE sync timeout, flushing unsynchronized");
+    }
+}
 
 /*******************************************************************************
 * Public API functions
@@ -126,6 +160,36 @@ lv_display_t *lvgl_port_add_disp(const lvgl_port_display_cfg_t *disp_cfg)
         /* Register done callback */
         esp_lcd_panel_io_register_event_callbacks(disp_ctx->io_handle, &cbs, disp);
 #endif
+
+        /* Optional TE synchronization: align the first transfer of each
+         * refresh cycle with the panel's tearing-effect edge. */
+        if (disp_cfg->flags.te_sync) {
+            disp_ctx->te_gpio_num = disp_cfg->te_gpio_num;
+            disp_ctx->te_sem = xSemaphoreCreateBinary();
+            if (disp_ctx->te_sem != NULL) {
+                const gpio_config_t te_config = {
+                    .pin_bit_mask = BIT64(disp_ctx->te_gpio_num),
+                    .mode = GPIO_MODE_INPUT,
+                    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                    .intr_type = GPIO_INTR_POSEDGE,
+                };
+                gpio_config(&te_config);
+                /* ESP_ERR_INVALID_STATE = ISR service already installed by
+                 * another driver, which is fine to share. */
+                esp_err_t isr_err = gpio_install_isr_service(0);
+                if (isr_err == ESP_OK || isr_err == ESP_ERR_INVALID_STATE) {
+                    isr_err = gpio_isr_handler_add(disp_ctx->te_gpio_num, lvgl_port_te_isr, disp_ctx);
+                }
+                if (isr_err != ESP_OK) {
+                    ESP_LOGE(TAG, "TE ISR registration failed (%s), TE sync disabled", esp_err_to_name(isr_err));
+                    vSemaphoreDelete(disp_ctx->te_sem);
+                    disp_ctx->te_sem = NULL;
+                } else {
+                    disp_ctx->te_sync_enabled = true;
+                    disp_ctx->te_wait_pending = true;
+                }
+            }
+        }
 
         /* Apply rotation from initial display configuration */
         lvgl_port_disp_rotation_update(disp_ctx);
@@ -235,6 +299,15 @@ esp_err_t lvgl_port_remove_disp(lv_display_t *disp)
     assert(disp);
     lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(disp);
 
+    /* The TE ISR owns a direct pointer to disp_ctx. Detach it before LVGL can
+     * delete the display or any context storage is released. */
+    if (disp_ctx->te_sem) {
+        gpio_intr_disable(disp_ctx->te_gpio_num);
+        gpio_isr_handler_remove(disp_ctx->te_gpio_num);
+        disp_ctx->te_observer_cb = NULL;
+        disp_ctx->te_observer_ctx = NULL;
+    }
+
     lvgl_port_lock(0);
     lv_disp_remove(disp);
     lvgl_port_unlock();
@@ -258,6 +331,9 @@ esp_err_t lvgl_port_remove_disp(lv_display_t *disp)
     if (disp_ctx->trans_sem) {
         vSemaphoreDelete(disp_ctx->trans_sem);
     }
+    if (disp_ctx->te_sem) {
+        vSemaphoreDelete(disp_ctx->te_sem);
+    }
 #if LVGL_PORT_PPA
     if (disp_ctx->ppa_handle) {
         lvgl_port_ppa_delete(disp_ctx->ppa_handle);
@@ -273,6 +349,82 @@ void lvgl_port_flush_ready(lv_display_t *disp)
 {
     assert(disp);
     lv_disp_flush_ready(disp);
+}
+
+esp_err_t lvgl_port_display_te_sync_enable(lv_display_t *disp, bool enable)
+{
+    ESP_RETURN_ON_FALSE(disp != NULL, ESP_ERR_INVALID_ARG, TAG, "Invalid display handle");
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(disp);
+    ESP_RETURN_ON_FALSE(disp_ctx != NULL && disp_ctx->te_sem != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "Display was not created with TE sync");
+    disp_ctx->te_sync_enabled = enable;
+    if (enable) {
+        disp_ctx->te_wait_pending = true;
+    }
+    return ESP_OK;
+}
+
+esp_err_t lvgl_port_display_te_observer_set(lv_display_t *disp,
+        lvgl_port_te_observer_cb_t callback, void *user_ctx)
+{
+    ESP_RETURN_ON_FALSE(disp != NULL, ESP_ERR_INVALID_ARG, TAG, "Invalid display handle");
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(disp);
+    ESP_RETURN_ON_FALSE(disp_ctx != NULL && disp_ctx->te_sem != NULL, ESP_ERR_INVALID_STATE, TAG,
+                        "Display was not created with TE sync");
+
+    /* Keep one permanent ISR handler and only change what it observes. The
+     * disabled interval also prevents it from seeing a half-updated callback
+     * and context pair. */
+    gpio_intr_disable(disp_ctx->te_gpio_num);
+    portENTER_CRITICAL(&disp_ctx->te_observer_mux);
+    if (callback == NULL) {
+        disp_ctx->te_observer_cb = NULL;
+        disp_ctx->te_observer_ctx = NULL;
+    } else {
+        disp_ctx->te_observer_ctx = user_ctx;
+        disp_ctx->te_observer_cb = callback;
+    }
+    portEXIT_CRITICAL(&disp_ctx->te_observer_mux);
+    esp_err_t error = gpio_set_intr_type(disp_ctx->te_gpio_num,
+                                         callback != NULL ? GPIO_INTR_ANYEDGE : GPIO_INTR_POSEDGE);
+    if (error == ESP_OK) {
+        error = gpio_intr_enable(disp_ctx->te_gpio_num);
+    }
+    if (error != ESP_OK) {
+        /* Leave normal TE sync usable even if observer setup failed. */
+        portENTER_CRITICAL(&disp_ctx->te_observer_mux);
+        disp_ctx->te_observer_cb = NULL;
+        disp_ctx->te_observer_ctx = NULL;
+        portEXIT_CRITICAL(&disp_ctx->te_observer_mux);
+        gpio_set_intr_type(disp_ctx->te_gpio_num, GPIO_INTR_POSEDGE);
+        gpio_intr_enable(disp_ctx->te_gpio_num);
+    }
+    return error;
+}
+
+static void lvgl_port_te_isr(void *arg)
+{
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)arg;
+    BaseType_t need_yield = pdFALSE;
+    if (disp_ctx == NULL) {
+        return;
+    }
+
+    const bool level = gpio_get_level(disp_ctx->te_gpio_num) != 0;
+    portENTER_CRITICAL_ISR(&disp_ctx->te_observer_mux);
+    lvgl_port_te_observer_cb_t observer = disp_ctx->te_observer_cb;
+    if (observer != NULL) {
+        observer(level, esp_timer_get_time(), disp_ctx->te_observer_ctx);
+    }
+    portEXIT_CRITICAL_ISR(&disp_ctx->te_observer_mux);
+    /* ANYEDGE is used only while an observer is active. LVGL synchronization
+     * must continue to consume rising edges exclusively. */
+    if (level && disp_ctx->te_sem != NULL) {
+        xSemaphoreGiveFromISR(disp_ctx->te_sem, &need_yield);
+    }
+    if (need_yield == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 /*******************************************************************************
@@ -332,6 +484,7 @@ static lv_display_t *lvgl_port_add_disp_priv(const lvgl_port_display_cfg_t *disp
 #endif
     ESP_GOTO_ON_FALSE(disp_ctx, ESP_ERR_NO_MEM, err, TAG, "Not enough memory for display context allocation!");
     memset(disp_ctx, 0, sizeof(lvgl_port_display_ctx_t));
+    portMUX_INITIALIZE(&disp_ctx->te_observer_mux);
     disp_ctx->io_handle = disp_cfg->io_handle;
     disp_ctx->panel_handle = disp_cfg->panel_handle;
     disp_ctx->control_handle = disp_cfg->control_handle;
@@ -392,6 +545,13 @@ static lv_display_t *lvgl_port_add_disp_priv(const lvgl_port_display_cfg_t *disp
         disp_ctx->draw_buffs[0] = buf1;
         disp_ctx->draw_buffs[1] = buf2;
     }
+#if LVGL_PORT_HANDLE_FLUSH_READY
+    if ((disp_cfg->io_handle != NULL) && (trans_sem == NULL)) {
+        trans_sem = xSemaphoreCreateBinary();
+        ESP_GOTO_ON_FALSE(trans_sem, ESP_ERR_NO_MEM, err, TAG, "Failed to create transport binary semaphore");
+        disp_ctx->trans_sem = trans_sem;
+    }
+#endif
 
     disp = lv_display_create(disp_cfg->hres, disp_cfg->vres);
 
@@ -443,6 +603,11 @@ static lv_display_t *lvgl_port_add_disp_priv(const lvgl_port_display_cfg_t *disp
     }
 
     lv_display_set_flush_cb(disp, lvgl_port_flush_callback);
+#if LVGL_PORT_HANDLE_FLUSH_READY
+    if (disp_ctx->trans_sem && disp_ctx->io_handle) {
+        lv_display_set_flush_wait_cb(disp, lvgl_port_flush_wait_callback);
+    }
+#endif
     lv_display_add_event_cb(disp, lvgl_port_disp_size_update_callback, LV_EVENT_RESOLUTION_CHANGED, disp_ctx);
     lv_display_add_event_cb(disp, lvgl_port_display_invalidate_callback, LV_EVENT_INVALIDATE_AREA, disp_ctx);
     lv_display_add_event_cb(disp, lvgl_port_display_invalidate_callback, LV_EVENT_REFR_REQUEST, disp_ctx);
@@ -505,13 +670,30 @@ err:
 }
 
 #if LVGL_PORT_HANDLE_FLUSH_READY
+static void lvgl_port_flush_wait_callback(lv_display_t *drv)
+{
+    assert(drv != NULL);
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(drv);
+    assert(disp_ctx != NULL);
+    assert(disp_ctx->trans_sem != NULL);
+    xSemaphoreTake(disp_ctx->trans_sem, portMAX_DELAY);
+}
+
 static bool lvgl_port_flush_io_ready_callback(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata,
         void *user_ctx)
 {
+    BaseType_t need_yield = pdFALSE;
     lv_display_t *disp_drv = (lv_display_t *)user_ctx;
     assert(disp_drv != NULL);
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(disp_drv);
+    assert(disp_ctx != NULL);
+
+    if (disp_ctx->flags.direct_mode) {
+        disp_ctx->last_tx_done_us = esp_timer_get_time();
+    }
     lv_disp_flush_ready(disp_drv);
-    return false;
+    xSemaphoreGiveFromISR(disp_ctx->trans_sem, &need_yield);
+    return (need_yield == pdTRUE);
 }
 
 #if (SOC_MIPI_DSI_SUPPORTED && ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0))
@@ -664,6 +846,102 @@ void lvgl_port_rotate_area(lv_display_t *disp, lv_area_t *area)
     }
 }
 
+/* GRAM-type panel (SPI/QSPI/I80, disp_type OTHER) in LVGL DIRECT mode: LVGL
+ * renders dirty areas straight into the full-frame buffer, so px_map is the
+ * frame base for every flush of the cycle. Join the dirty areas and transmit
+ * a single full-width band once per cycle, gated on the TE edge, so the panel
+ * never scans a frame that is only partially updated. Non-last flushes carry
+ * no transfer and are acknowledged immediately so LVGL keeps rendering. */
+static void lvgl_port_flush_direct_band(lv_display_t *drv, const lv_area_t *area, uint8_t *color_map)
+{
+    lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(drv);
+    assert(disp_ctx != NULL);
+
+    if (disp_ctx->cycle_area_valid) {
+        /* Inline join of the dirty area (LVGL 9.5 keeps _lv_area_join
+         * private; min/max on the four edges is the whole operation). */
+        if (area->x1 < disp_ctx->cycle_area.x1) {
+            disp_ctx->cycle_area.x1 = area->x1;
+        }
+        if (area->y1 < disp_ctx->cycle_area.y1) {
+            disp_ctx->cycle_area.y1 = area->y1;
+        }
+        if (area->x2 > disp_ctx->cycle_area.x2) {
+            disp_ctx->cycle_area.x2 = area->x2;
+        }
+        if (area->y2 > disp_ctx->cycle_area.y2) {
+            disp_ctx->cycle_area.y2 = area->y2;
+        }
+    } else {
+        disp_ctx->cycle_area = *area;
+        disp_ctx->cycle_area_valid = true;
+    }
+
+    if (!lv_disp_flush_is_last(drv)) {
+        lv_disp_flush_ready(drv);
+        return;
+    }
+    disp_ctx->cycle_area_valid = false;
+
+    /* Frame timing diagnostics (one log line per 120 transmitted bands):
+     * render->flush entry, TE wait, and DMA transfer phases. */
+    static uint32_t s_diag_count;
+    int64_t diag_te_us = 0;
+    const int64_t t_flush = esp_timer_get_time();
+    const bool diag_log = s_diag_count != 0U && (s_diag_count % 120U) == 0U;
+
+    const int32_t hres = lv_display_get_horizontal_resolution(drv);
+    const int32_t vres = lv_display_get_vertical_resolution(drv);
+    int32_t y1 = disp_ctx->cycle_area.y1;
+    int32_t y2 = disp_ctx->cycle_area.y2;
+    if (y1 < 0) {
+        y1 = 0;
+    }
+    if (y2 > vres - 1) {
+        y2 = vres - 1;
+    }
+
+    /* The last transfer of the previous cycle is guaranteed complete: the
+     * flush-wait hook ran before this cycle's first draw_buf_flush. Just drop
+     * the stale completion count. */
+    if (disp_ctx->trans_sem) {
+        xSemaphoreTake(disp_ctx->trans_sem, 0);
+    }
+    /* Consume a pending-cycle flag so the legacy path never double-waits. */
+    disp_ctx->te_wait_pending = false;
+    if (disp_ctx->te_sem != NULL && disp_ctx->te_sync_enabled) {
+        lvgl_port_te_wait(disp_ctx);
+    }
+    if (diag_log) {
+        diag_te_us = esp_timer_get_time();
+    }
+
+    const size_t px_size = lv_color_format_get_size(lv_display_get_color_format(drv));
+    uint8_t *band = color_map + (size_t)y1 * (size_t)hres * px_size;
+    const int64_t previous_tx_start_us = disp_ctx->last_tx_start_us;
+    const int64_t previous_tx_done_us = disp_ctx->last_tx_done_us;
+    disp_ctx->last_tx_start_us = esp_timer_get_time();
+    const esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle,
+                                                         0, y1, hres, y2 + 1, band);
+    if (diag_log) {
+        /* Spans refer to the previous band: tx_done is stamped by the
+         * transfer-done ISR. render_sched = prev tx_done -> this flush entry
+         * (LVGL render + scheduling); te_wait = flush entry -> TE edge;
+         * prev_tx = previous DMA transfer duration. */
+        ESP_LOGI(TAG, "band y=%d..%d render_sched=%lldus te_wait=%lldus prev_tx=%lldus",
+                 (int)y1, (int)y2,
+                 (long long)(t_flush - previous_tx_done_us),
+                 (long long)(diag_te_us - t_flush),
+                 (long long)(previous_tx_done_us - previous_tx_start_us));
+    }
+    s_diag_count++;
+    if (draw_err != ESP_OK) {
+        ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+        lv_disp_flush_ready(drv);
+    }
+    /* A successful transfer is completed by flush_io_ready_callback(). */
+}
+
 static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, uint8_t *color_map)
 {
     assert(drv != NULL);
@@ -671,6 +949,13 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
     assert(color_map != NULL);
     lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(drv);
     assert(disp_ctx != NULL);
+    const bool is_last_flush = lv_disp_flush_is_last(drv);
+
+    /* GRAM-type panel in DIRECT mode: coalesced TE-gated band flush. */
+    if (disp_ctx->disp_type == LVGL_PORT_DISP_TYPE_OTHER && disp_ctx->flags.direct_mode) {
+        lvgl_port_flush_direct_band(drv, area, color_map);
+        return;
+    }
 
     int offsetx1 = area->x1;
     int offsetx2 = area->x2;
@@ -745,17 +1030,46 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
         _lvgl_port_transform_monochrome(drv, area, &color_map);
     }
 
+    /* TE sync: the first transfer of every refresh cycle waits for the
+     * panel's vertical porch. A long transfer can still cross the scan. */
+    if (disp_ctx->te_sem != NULL && disp_ctx->te_sync_enabled && disp_ctx->te_wait_pending) {
+        disp_ctx->te_wait_pending = false;
+        lvgl_port_te_wait(disp_ctx);
+    }
+
     if ((disp_ctx->disp_type == LVGL_PORT_DISP_TYPE_RGB || disp_ctx->disp_type == LVGL_PORT_DISP_TYPE_DSI)
             && (disp_ctx->flags.direct_mode || disp_ctx->flags.full_refresh)) {
-        if (lv_disp_flush_is_last(drv)) {
+        if (is_last_flush) {
             /* If the interface is I80 or SPI, this step cannot be used for drawing. */
-            esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, 0, 0, lv_disp_get_hor_res(drv), lv_disp_get_ver_res(drv), color_map);
-            /* Waiting for the last frame buffer to complete transmission */
-            xSemaphoreTake(disp_ctx->trans_sem, 0);
-            xSemaphoreTake(disp_ctx->trans_sem, portMAX_DELAY);
+            esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, 0, 0,
+                                                           lv_disp_get_hor_res(drv), lv_disp_get_ver_res(drv),
+                                                           color_map);
+            if (draw_err != ESP_OK) {
+                ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+            } else {
+                /* Waiting for the last frame buffer to complete transmission */
+                xSemaphoreTake(disp_ctx->trans_sem, 0);
+                xSemaphoreTake(disp_ctx->trans_sem, portMAX_DELAY);
+            }
         }
     } else {
-        esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_map);
+        if (disp_ctx->io_handle && disp_ctx->trans_sem) {
+            xSemaphoreTake(disp_ctx->trans_sem, 0);
+        }
+        esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, offsetx1, offsety1,
+                                                       offsetx2 + 1, offsety2 + 1, color_map);
+        if (draw_err != ESP_OK) {
+            ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+            lv_disp_flush_ready(drv);
+        }
+    }
+
+    /* Arm TE only after the final transfer of this refresh cycle has been
+     * queued. The next cycle consumes it on its first transfer. Re-arming in
+     * flush_wait_cb would incorrectly wait one TE edge for every PARTIAL
+     * draw-buffer chunk. */
+    if (is_last_flush && disp_ctx->te_sem != NULL && disp_ctx->te_sync_enabled) {
+        disp_ctx->te_wait_pending = true;
     }
 
     if (disp_ctx->disp_type == LVGL_PORT_DISP_TYPE_RGB || (disp_ctx->disp_type == LVGL_PORT_DISP_TYPE_DSI

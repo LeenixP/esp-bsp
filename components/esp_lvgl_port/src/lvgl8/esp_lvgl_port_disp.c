@@ -239,6 +239,12 @@ void lvgl_port_flush_ready(lv_disp_t *disp)
     lv_disp_flush_ready(disp->driver);
 }
 
+/* TE synchronization is implemented for LVGL 9 only */
+esp_err_t lvgl_port_display_te_sync_enable(lv_display_t *disp, bool enable)
+{
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 /*******************************************************************************
 * Private functions
 *******************************************************************************/

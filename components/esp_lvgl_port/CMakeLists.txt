@@ -137,5 +137,10 @@ target_link_libraries(lvgl_port_lib PRIVATE
     ${ADD_LIBS}
     )
 
+# GPIO driver is split into esp_driver_gpio on IDF v5+
+if(NOT "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}" VERSION_LESS "5.0")
+    target_link_libraries(lvgl_port_lib PRIVATE idf::esp_driver_gpio)
+endif()
+
 # Finally, link the lvgl_port_lib its esp-idf interface library
 target_link_libraries(${COMPONENT_LIB} INTERFACE lvgl_port_lib)
