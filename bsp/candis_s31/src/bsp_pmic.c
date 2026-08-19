@@ -195,6 +195,18 @@ esp_err_t bsp_pmic_get_input_current_limit(uint16_t *milliamps)
     return tg28_sw_get_input_current_limit(s_pmic, milliamps);
 }
 
+esp_err_t bsp_pmic_set_vindpm(uint16_t millivolts)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_vindpm(s_pmic, millivolts);
+}
+
+esp_err_t bsp_pmic_get_vindpm(uint16_t *millivolts)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_vindpm(s_pmic, millivolts);
+}
+
 esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
@@ -205,6 +217,13 @@ esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
     return tg28_sw_get_charge_voltage(s_pmic, millivolts);
+}
+
+esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
+                                  size_t count)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_read_registers(s_pmic, register_address, values, count);
 }
 
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)

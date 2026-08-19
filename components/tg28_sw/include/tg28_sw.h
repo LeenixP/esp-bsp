@@ -181,6 +181,16 @@ typedef struct {
 } tg28_sw_status_t;
 
 /**
+ * @brief Read contiguous raw TG28 registers.
+ *
+ * This diagnostic API performs no field decoding and no writeback. Register
+ * semantics and side effects remain owned by the PMIC; callers must not use
+ * it to replace the typed APIs.
+ */
+esp_err_t tg28_sw_read_registers(tg28_sw_handle_t handle, uint8_t register_address,
+                                 uint8_t *values, size_t count);
+
+/**
  * @brief Create a TG28 switch-charger device on an existing I2C bus.
  *
  * The I2C bus remains owned by the caller. The driver verifies that the chip

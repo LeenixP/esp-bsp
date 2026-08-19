@@ -649,6 +649,19 @@ bool tg28_sw_is_supported_chip_id(uint8_t chip_id)
     return chip_id == 0x47 || chip_id == 0x4A;
 }
 
+esp_err_t tg28_sw_read_registers(tg28_sw_handle_t handle, uint8_t register_address,
+                                 uint8_t *values, size_t count)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && values != NULL && count > 0,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid raw read request");
+    ESP_RETURN_ON_FALSE((size_t)UINT8_MAX - register_address + 1 >= count,
+                        ESP_ERR_INVALID_SIZE, TAG, "raw read crosses the register map");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = read_registers(handle, register_address, values, count);
+    unlock_device(handle);
+    return error;
+}
+
 /* The caller must already hold the device lock. */
 static esp_err_t read_adc_channel_locked(tg28_sw_handle_t handle,
         tg28_sw_adc_channel_t channel, uint16_t *millivolts)
