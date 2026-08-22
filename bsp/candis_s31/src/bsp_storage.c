@@ -133,12 +133,24 @@ esp_err_t bsp_sdcard_unmount(void)
     if (s_card == NULL) {
         return ESP_OK;
     }
-    esp_err_t error = esp_vfs_fat_sdcard_unmount(BSP_SD_MOUNT_POINT, s_card);
-    if (error == ESP_OK) {
-        s_card = NULL;
-        error = bsp_peripheral_power_set(BSP_PERIPHERAL_SDCARD, false);
+
+    sdmmc_card_t *card = s_card;
+    /* The IDF unmount path can release the card before a later VFS
+     * unregister error is returned.  Once unmount starts, the handle must no
+     * longer be exposed as a mounted card. */
+    s_card = NULL;
+    esp_err_t unmount_error =
+        esp_vfs_fat_sdcard_unmount(BSP_SD_MOUNT_POINT, card);
+    esp_err_t power_error =
+        bsp_peripheral_power_set(BSP_PERIPHERAL_SDCARD, false);
+    if (unmount_error != ESP_OK) {
+        if (power_error != ESP_OK) {
+            ESP_LOGE(TAG, "SD card power-down also failed (%s)",
+                     esp_err_to_name(power_error));
+        }
+        return unmount_error;
     }
-    return error;
+    return power_error;
 }
 
 sdmmc_card_t *bsp_sdcard_get_handle(void)

@@ -168,7 +168,7 @@
         {"name": "espressif/fusb303b", "version": "^0.2.0", "public": "false", "min_idf": "5.3"},
         {"name": "espressif/rx8130ce", "version": "^0.3.0", "public": "true", "min_idf": "5.3"},
         {"name": "espressif/tg28_sw", "version": "^0.3.0", "public": "false", "min_idf": "5.3"},
-        {"name": "esp_codec_dev", "version": "~1.5", "public": "true", "min_idf": "5.0"},
+        {"name": "esp_codec_dev", "version": "^1.6.2", "public": "true", "min_idf": "5.0"},
         {"name": "espressif/esp_lvgl_port", "version": "^2", "public": "true", "min_idf": "5.1"},
         {"name": "espressif/esp_lcd_co5300", "version": "^2.0.3", "public": "false", "min_idf": "5.1"},
         {"name": "espressif/esp_lcd_touch_cst820", "version": "^1.0.0", "public": "false", "min_idf": "5.2"},

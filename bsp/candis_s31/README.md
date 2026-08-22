@@ -27,7 +27,7 @@ must be confirmed during EVT bring-up before the component is released.
 |:heavy_check_mark:|    :point_up: TOUCH    |     cst820     |[espressif/esp_lcd_touch_cst820](https://components.espressif.com/components/espressif/esp_lcd_touch_cst820)|   ^1.0.0   |
 |        :x:       | :radio_button: BUTTONS |                |                                                                                                            |            |
 |        :x:       |   :white_circle: KNOB  |                |                                                                                                            |            |
-|:heavy_check_mark:|  :musical_note: AUDIO  |                |       [espressif/esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev)       |    ~1.5    |
+|:heavy_check_mark:|  :musical_note: AUDIO  |                |       [espressif/esp_codec_dev](https://components.espressif.com/components/espressif/esp_codec_dev)       |   ^1.6.2   |
 |:heavy_check_mark:| :speaker: AUDIO_SPEAKER|     es8389     |                                                                                                            |            |
 |:heavy_check_mark:| :microphone: AUDIO_MIC |     es8389     |                                                                                                            |            |
 |:heavy_check_mark:|  :floppy_disk: SDCARD  |                |                                                     idf                                                    |    >=6.1   |
@@ -69,6 +69,39 @@ battery constant-current limit (0-200mA in 25mA steps, then 300-1500mA in
 100mA steps) and the discrete termination voltage
 (3900/4000/4100/4200/4350/4400mV). PMIC init also clears latched interrupt
 status before enabling the power-key interrupts.
+
+`bsp_pmic_init()` also forces a deterministic charge-profile baseline with
+exact readback verification before any other setup (any mismatch aborts the
+init and deletes the handle): REG62 charge current to
+`BSP_PMIC_SAFE_CHARGE_CURRENT_MA` (50 mA; the register outlives an ESP-only
+reset, so a ceiling raised by an earlier session is collapsed before a weak
+source can be plugged in), REG64 charge voltage to
+`BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV` (4200 mV; POR is unspecified and the
+vendor FAQ requires the register to match the fuel-gauge model CV or the
+SOC jumps), REG61 precharge to 50 mA and REG63 termination to 25 mA with
+termination enabled (vendor EVB recipe, manual section 4.5 step 5). The
+matching public setters/getters are `bsp_pmic_set/get_charge_current`,
+`bsp_pmic_set/get_charge_voltage`,
+`bsp_pmic_set/get_precharge_current` and
+`bsp_pmic_set/get_termination_current`. Init then programs the built-in
+reference fuel-gauge model best-effort
+(`src/bsp_pmic_reference_model.c`): the vendor generic 4.2 V-class
+fallback, GPL-origin data that is NOT Apache-2.0 - redistribution requires
+a license review, and replacing it with a properly licensed cell-specific
+model is an upstream/external-release blocker. SOC accuracy with the
+reference model is provisional; a materially different battery SKU or
+chemistry needs a new model, not per-unit calibration. A download failure
+only logs a warning; charging and the PMIC stay alive. A later
+cell-specific model can replace the reference at runtime through
+`bsp_pmic_program_battery_model()` (re-verifies; the driver-level
+create-time `battery_model` hook is unused because it fails the whole
+create on a download error). `bsp_pmic_status_t.fuel_gauge_valid` reports
+whether the SOC estimate is currently backed by a model and
+`fuel_gauge_reference_model` whether that model is the reference default
+(reference accuracy) or a custom override; when invalid, treat
+`battery_percent` as meaningless and never convert `battery_mv`
+into a percentage instead. Validity is dropped before a runtime override
+attempt and on init failure, so a partial download is never reported.
 
 `bsp_power_safe_state()` is a low-level best-effort rail/GPIO sweep. Stop
 active display, audio, camera, and USB owners first so they can release handles
@@ -205,20 +238,21 @@ is initialized. See the note in `bsp_camera.c`.
 
 The ES8389 codec sits on the main I2C bus (address 0x20) and on I2S
 (MCLK=GPIO35, BCLK=GPIO18, WS=GPIO19, DOUT=GPIO8, DIN=GPIO44); the speaker
-amplifier enable is GPIO42. The BSP clocks the codec from MCLK
-(`use_mclk=true`), which also makes `es8389_set_fs()` skip its coefficient
-lookup.
+amplifier enable is GPIO42. Both speaker and microphone logical devices clock
+the codec from BCLK with `no_dac_ref=true`; at 16 kHz/16-bit stereo this is an
+exact 512 kHz, ratio-32 coefficient-table match.
 
 `BSP_I2S_SAMPLE_RATE` is 16000 Hz and `bsp_audio_init()` uses it for its
 default `i2s_std_config_t`. Keep any override inside the es8389 driver's
-coefficient table (`coeff_div[]` in esp_codec_dev `~1.5`:
+coefficient table (`coeff_div[]` in esp_codec_dev `1.6.x`:
 8000/16000/24000/32000/44100/48000/88200/96000/192000 Hz) - the previous
 22050 Hz default has no row there, so `es8389_config_sample()` cannot resolve
 codec clocks for it on any BCLK-clocked path.
 
-Speaker and microphone are separate `esp_codec_dev` instances over the same
-chip; whichever side is opened last soft-resets the whole codec. If both
-directions are used, re-verify the speaker -> mic -> speaker sequence (see
-the note in `bsp_audio.c`).
+Speaker and microphone remain separate logical `esp_codec_dev` instances over
+the same chip. Version 1.6.2 reference-counts that physical ES8389 and avoids
+the repeated whole-chip reset in 1.5.11; the two BSP configs intentionally use
+the same clock/reference fields so initialization order cannot change ADC
+routing.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)

@@ -46,31 +46,36 @@ menu "Board Support Package (Candis-S31)"
             bool "Synchronize LVGL flushes with the panel TE signal"
             default y
             help
-                Gates the first transfer of every LVGL refresh cycle on the
-                CO5300 tearing-effect edge (GPIO16). All PARTIAL chunks in the
-                same cycle then stream back-to-back, allowing LVGL rendering
-                and QSPI DMA to overlap. A transfer that lasts longer than one
-                panel scan can still cross the scan position.
+                Registers the CO5300 tearing-effect edge (GPIO16) with the
+                esp_lvgl_adapter TE_SYNC path. The adapter uses this profile
+                in LVGL RENDER_MODE_FULL: each TE-gated flush transfers the
+                whole frame. Disabling this removes TE gating entirely (the
+                adapter falls back to unsynchronized flushes).
 
         config BSP_LCD_DRAW_BUF_HEIGHT
-            int "LVGL draw buffer height"
+            int "Display transfer buffer height (lines)"
             default 80
             range 10 460
+            help
+                With esp_lvgl_adapter the draw buffers are owned by the
+                adapter, so this value only sizes the QSPI bus
+                max_transfer_sz (460 x HEIGHT x 2 bytes of internal DMA).
 
         config BSP_LCD_DRAW_BUF_DOUBLE
             bool "Use two LVGL draw buffers"
             default y
+            help
+                Vestigial on the esp_lvgl_adapter path: the TE_SYNC profile
+                always uses a single full-frame PSRAM buffer. Kept so
+                existing sdkconfig files keep parsing.
 
         config BSP_LCD_DIRECT_MODE
             bool "Full-frame PSRAM DIRECT rendering with per-cycle TE-gated flush"
             default n
             help
-                Uses one full-frame (460x460) LVGL buffer in PSRAM and the
-                LVGL DIRECT render mode. Dirty areas in a refresh cycle are
-                joined into one full-width, TE-gated band. This preserves a
-                persistent framebuffer but serializes rendering behind the
-                previous transfer; the default double-buffered PARTIAL mode
-                is normally faster. Requires CONFIG_BSP_LCD_TE_SYNC.
+                Historical esp_lvgl_port option. The current esp_lvgl_adapter
+                path ignores the DIRECT profile flags and always runs the
+                TE_SYNC full-frame pipeline; leave disabled.
     endmenu
 
     menu "Storage"

@@ -14,11 +14,19 @@
 #include "tg28_sw.h"
 
 #include "bsp/candis_s31.h"
+#include "bsp_pmic_reference_model.h"
 
 static const char *TAG = "candis_pmic";
 static tg28_sw_handle_t s_pmic;
 static uint8_t s_boot_irq_snapshot[3];
 static bool s_boot_irq_valid;
+/* Battery-model validity: the REGA1 128-byte model governs whether the
+ * TG28 SOC estimate means anything, and which model is active: the BSP
+ * reference default or a caller-supplied override. Both false unless a
+ * programming attempt succeeded this boot; never survives a failed
+ * init/retry or deinit. */
+static bool s_fuel_gauge_valid;
+static bool s_fuel_gauge_reference_model;
 
 _Static_assert((int)BSP_PMIC_REGULATOR_COUNT == (int)TG28_SW_REGULATOR_COUNT,
                "BSP and TG28_SW regulator lists must stay aligned");
@@ -48,6 +56,10 @@ esp_err_t bsp_pmic_init(void)
     if (s_pmic != NULL) {
         return ESP_OK;
     }
+    s_fuel_gauge_valid = false;
+    s_fuel_gauge_reference_model = false;
+    memset(s_boot_irq_snapshot, 0, sizeof(s_boot_irq_snapshot));
+    s_boot_irq_valid = false;
 
     i2c_master_bus_handle_t bus = bsp_lp_i2c_get_handle();
     ESP_RETURN_ON_FALSE(bus != NULL, ESP_FAIL, TAG, "low-power I2C init failed");
@@ -59,20 +71,134 @@ esp_err_t bsp_pmic_init(void)
     esp_err_t error = tg28_sw_create(bus, &config, &s_pmic);
     uint16_t previous_input_limit = 0;
     if (error == ESP_OK) {
+        /* REG62 outlives an ESP-only reset, so any charge target a
+         * previous session raised is still active here. Force the safe
+         * default and verify the exact readback before anything else:
+         * a weak source plugged in later must never inherit it. */
+        error = tg28_sw_set_charge_current(
+                    s_pmic, BSP_PMIC_SAFE_CHARGE_CURRENT_MA);
+    }
+    uint16_t charge_current_ma = 0;
+    if (error == ESP_OK) {
+        error = tg28_sw_get_charge_current(s_pmic, &charge_current_ma);
+    }
+    if (error == ESP_OK &&
+            charge_current_ma != BSP_PMIC_SAFE_CHARGE_CURRENT_MA) {
+        ESP_LOGE(TAG, "charge current readback %u mA != %u mA",
+                 charge_current_ma, BSP_PMIC_SAFE_CHARGE_CURRENT_MA);
+        error = ESP_FAIL;
+    }
+    uint16_t charge_voltage_mv = 0;
+    if (error == ESP_OK) {
+        error = tg28_sw_set_charge_voltage(s_pmic,
+                                           BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV);
+    }
+    if (error == ESP_OK) {
+        error = tg28_sw_get_charge_voltage(s_pmic, &charge_voltage_mv);
+    }
+    if (error == ESP_OK &&
+            charge_voltage_mv != BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV) {
+        ESP_LOGE(TAG, "charge voltage readback %u mV != %u mV",
+                 charge_voltage_mv, BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV);
+        error = ESP_FAIL;
+    }
+    uint16_t precharge_ma = 0;
+    if (error == ESP_OK) {
+        error = tg28_sw_set_precharge_current(
+                    s_pmic, BSP_PMIC_SAFE_PRECHARGE_CURRENT_MA);
+    }
+    if (error == ESP_OK) {
+        error = tg28_sw_get_precharge_current(s_pmic, &precharge_ma);
+    }
+    if (error == ESP_OK &&
+            precharge_ma != BSP_PMIC_SAFE_PRECHARGE_CURRENT_MA) {
+        ESP_LOGE(TAG, "precharge readback %u mA != %u mA",
+                 precharge_ma, BSP_PMIC_SAFE_PRECHARGE_CURRENT_MA);
+        error = ESP_FAIL;
+    }
+    uint16_t term_ma = 0;
+    bool term_enabled = false;
+    if (error == ESP_OK) {
+        error = tg28_sw_set_termination_current(
+                    s_pmic, BSP_PMIC_SAFE_TERMINATION_CURRENT_MA, true);
+    }
+    if (error == ESP_OK) {
+        error = tg28_sw_get_termination_current(s_pmic, &term_ma,
+                                                &term_enabled);
+    }
+    if (error == ESP_OK &&
+            (term_ma != BSP_PMIC_SAFE_TERMINATION_CURRENT_MA ||
+             !term_enabled)) {
+        ESP_LOGE(TAG, "termination readback %u mA enabled=%d != %u mA enabled=1",
+                 term_ma, term_enabled, BSP_PMIC_SAFE_TERMINATION_CURRENT_MA);
+        error = ESP_FAIL;
+    }
+    uint16_t input_limit_ma = 0;
+    if (error == ESP_OK) {
         error = tg28_sw_get_input_current_limit(s_pmic,
                                                 &previous_input_limit);
     }
     if (error == ESP_OK) {
-        /* Type-C1 has fixed Rd resistors but no CC-current detector. Clamp
-         * the TG28 POR value (1500 mA) to one USB unit load before any other
-         * board initialization can increase consumption. */
+        /* Type-C1 has fixed Rd resistors but no CC-current detector, so
+         * the input limit is set to the accepted 500 mA configured/
+         * default ceiling (BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA) instead
+         * of the 1500 mA POR value - strictly BEFORE the ~1 s
+         * battery-model download, so the source limit is in force while
+         * the gauge subsystem draws its programming current. */
         error = tg28_sw_set_input_current_limit(
                     s_pmic, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
+    }
+    if (error == ESP_OK) {
+        error = tg28_sw_get_input_current_limit(s_pmic, &input_limit_ma);
+    }
+    if (error == ESP_OK &&
+            input_limit_ma != BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA) {
+        ESP_LOGE(TAG, "input limit readback %u mA != %u mA",
+                 input_limit_ma, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
+        error = ESP_FAIL;
     }
     if (error == ESP_OK &&
             previous_input_limit != BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA) {
         ESP_LOGW(TAG, "input current limit clamped from %u mA to %u mA",
                  previous_input_limit, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
+    }
+    if (error == ESP_OK) {
+        /* One-shot afternoon evidence: every safe-profile register read
+         * back exactly as written. */
+        ESP_LOGI(TAG,
+                 "safe profile verified: input=%u mA (was %u), charge=%u mA, "
+                 "precharge=%u mA, termination=%u mA/en, Vchg=%u mV",
+                 input_limit_ma, previous_input_limit, charge_current_ma,
+                 precharge_ma, term_ma, charge_voltage_mv);
+    }
+    if (error == ESP_OK) {
+        /* Default fuel-gauge model, best-effort: the vendor generic
+         * 4.2 V-class reference table (see bsp_pmic_reference_model.c for
+         * provenance and license review status). Programmed after the
+         * charge baseline and the input-limit clamp so the gauge has a
+         * model before any charge stepping begins. The driver-level
+         * create-time battery_model hook is deliberately unused: it fails
+         * the whole create on a download error (tg28_sw.c:605-610), while
+         * here a failure must only leave the fuel gauge invalid -
+         * charging and the PMIC stay alive. A caller-supplied/custom
+         * model can still be programmed via bsp_pmic_program_battery_model(),
+         * which re-verifies and replaces this reference. SOC accuracy
+         * with this generic model is reference-grade; a different battery
+         * SKU/chemistry needs a new model, not per-unit calibration. */
+        const esp_err_t model_err = tg28_sw_program_battery_model(
+            s_pmic, bsp_pmic_reference_battery_model,
+            BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE);
+        if (model_err == ESP_OK) {
+            s_fuel_gauge_valid = true;
+            s_fuel_gauge_reference_model = true;
+            ESP_LOGI(TAG,
+                     "reference battery model verified (%d bytes, gauge on)",
+                     BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE);
+        } else {
+            ESP_LOGW(TAG, "reference battery model download failed: %s "
+                     "(fuel gauge stays invalid; charging continues)",
+                     esp_err_to_name(model_err));
+        }
     }
     if (error == ESP_OK) {
         /* Clear any latched interrupt status before enabling the power-key
@@ -104,6 +230,12 @@ esp_err_t bsp_pmic_init(void)
     if (error != ESP_OK && s_pmic != NULL) {
         tg28_sw_delete(s_pmic);
         s_pmic = NULL;
+        /* A failed init/retry must never inherit model validity or stale
+         * boot-IRQ evidence from the attempt that just died. */
+        s_fuel_gauge_valid = false;
+        s_fuel_gauge_reference_model = false;
+        memset(s_boot_irq_snapshot, 0, sizeof(s_boot_irq_snapshot));
+        s_boot_irq_valid = false;
     }
     return error;
 }
@@ -116,8 +248,34 @@ esp_err_t bsp_pmic_deinit(void)
     const esp_err_t error = tg28_sw_delete(s_pmic);
     if (error == ESP_OK) {
         s_pmic = NULL;
+        s_fuel_gauge_valid = false;
+        s_fuel_gauge_reference_model = false;
     }
     return error;
+}
+
+esp_err_t bsp_pmic_set_precharge_current(uint16_t milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_precharge_current(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_get_precharge_current(uint16_t *milliamps)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_precharge_current(s_pmic, milliamps);
+}
+
+esp_err_t bsp_pmic_set_termination_current(uint16_t milliamps, bool enable)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_set_termination_current(s_pmic, milliamps, enable);
+}
+
+esp_err_t bsp_pmic_get_termination_current(uint16_t *milliamps, bool *enabled)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_get_termination_current(s_pmic, milliamps, enabled);
 }
 
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status)
@@ -133,6 +291,8 @@ esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status)
     status->common_status1 = device_status.common_status1;
     status->battery_mv = device_status.battery_mv;
     status->battery_percent = device_status.battery_percent;
+    status->fuel_gauge_valid = s_fuel_gauge_valid;
+    status->fuel_gauge_reference_model = s_fuel_gauge_reference_model;
     status->battery_present = device_status.battery_present;
     status->vbus_present = device_status.vbus_present;
     status->charging = device_status.charging;
@@ -229,7 +389,20 @@ esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
-    return tg28_sw_program_battery_model(s_pmic, model, size);
+    /* Custom override: drop validity first so a failed or partial write
+     * can never leave the previous (reference) model reported as the
+     * active valid one. */
+    s_fuel_gauge_valid = false;
+    s_fuel_gauge_reference_model = false;
+    const esp_err_t error = tg28_sw_program_battery_model(s_pmic, model,
+                                                          size);
+    if (error == ESP_OK) {
+        /* A full custom model is now verified in the gauge: valid, and
+         * explicitly not the BSP reference default. */
+        s_fuel_gauge_valid = true;
+        s_fuel_gauge_reference_model = false;
+    }
+    return error;
 }
 
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator,

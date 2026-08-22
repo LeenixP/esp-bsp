@@ -23,15 +23,11 @@ typedef struct {
     const audio_codec_gpio_if_t *gpio;
 } codec_instance_t;
 
-/* Speaker and microphone are two separate es8389_codec_new() instances
- * against the same physical chip, and each instance's open() performs a
- * full soft reset of the whole codec (ES8389_RESET_REG0x00, see
- * device/es8389/es8389.c in esp_codec_dev). Whichever side is opened last
- * therefore wipes the other side's register state. This structure is kept
- * as-is (same as the official esp32_s31_korvo_1 BSP); a single shared
- * instance would need a larger redesign.
- * EVT: re-verify the speaker -> mic -> speaker sequence with both sides
- * opened before relying on concurrent playback + recording. */
+/* Speaker and microphone are separate logical devices over one ES8389.
+ * esp_codec_dev >= 1.6.0 identifies that shared physical codec by I2C
+ * port/address and reference-counts its hardware state. Both instances must
+ * nevertheless use the same clock/reference policy: the first instance owns
+ * the physical initialization while the second reuses it. */
 static codec_instance_t s_speaker;
 static codec_instance_t s_microphone;
 
@@ -261,14 +257,13 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         .pa_voltage = 4.2,
         .codec_dac_voltage = 3.3,
     };
-    /* The board routes MCLK (GPIO35) to the codec, so clock it from MCLK
-     * instead of deriving the clock from BCLK. Besides using the proper
-     * clock, use_mclk=true makes es8389_set_fs() skip es8389_config_sample()
-     * and its coefficient-table lookup entirely (and set_fs() would drop that
-     * function's error anyway, leaving the codec clocks in their open()
-     * state). BSP_I2S_SAMPLE_RATE is still kept inside that table so the
-     * lookup resolves if this ever runs on the BCLK path. open() programs
-     * MCLK/LRCK=256, matching the I2S STD default mclk_multiple=256. */
+    /* Use the same BCLK/no-DAC-reference policy as the microphone instance.
+     * esp_codec_dev 1.6.x shares the physical ES8389 between both logical
+     * devices, so these fields must not depend on creation order. At
+     * 16 kHz/16-bit stereo, BCLK is 512 kHz and the x2 coefficient row is an
+     * exact match. Post-reflow DAC-to-ADC loopback proved the digital DAC
+     * path, and the operator separately confirmed every acoustic speaker
+     * regression tone with this common policy. */
     es8389_codec_cfg_t codec_config = {
         .ctrl_if = s_speaker.control,
         .gpio_if = s_speaker.gpio,
@@ -276,7 +271,8 @@ esp_codec_dev_handle_t bsp_audio_codec_speaker_init(void)
         .pa_pin = BSP_AUDIO_PA_EN,
         .pa_reverted = BSP_AUDIO_PA_EN_ACTIVE_LEVEL == 0,
         .master_mode = false,
-        .use_mclk = true,
+        .use_mclk = false,
+        .no_dac_ref = true,
         .hw_gain = gain,
     };
     s_speaker.codec = es8389_codec_new(&codec_config);
@@ -311,10 +307,14 @@ esp_codec_dev_handle_t bsp_audio_codec_microphone_init(void)
     es8389_codec_cfg_t codec_config = {
         .ctrl_if = s_microphone.control,
         .codec_mode = ESP_CODEC_DEV_WORK_MODE_ADC,
-        /* Same physical chip as the speaker side: must also clock from MCLK,
-         * otherwise this instance's open() would switch the whole codec back
-         * to BCLK-derived clocks (see bsp_audio_codec_speaker_init). */
-        .use_mclk = true,
+        /* Keep this identical to the speaker instance. On esp_codec_dev
+         * 1.5.11 the two conflicting policies reset the same physical chip
+         * and left 0x02/0x23/0xF0 in speaker state after mic -> speaker ->
+         * mic, producing an exact-zero left ADC channel. Version 1.6.2 adds
+         * physical-codec reuse; matching configs make that reuse independent
+         * of which logical device is created first. */
+        .use_mclk = false,
+        .no_dac_ref = true,
     };
     s_microphone.codec = es8389_codec_new(&codec_config);
     if (s_microphone.codec == NULL) {

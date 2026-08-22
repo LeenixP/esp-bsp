@@ -37,7 +37,7 @@
 #include "bsp/touch.h"
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
-#include "esp_lvgl_port.h"
+#include "esp_lv_adapter.h"
 #include "lvgl.h"
 #endif
 
@@ -181,7 +181,7 @@
  *  @{
  */
 /* Keep this rate inside the es8389 driver's coefficient table. coeff_div[]
- * (device/es8389/es8389.c, esp_codec_dev ~1.5) only holds
+ * (device/es8389/es8389.c, esp_codec_dev 1.6.x) only holds
  * 8000/16000/24000/32000/44100/48000/88200/96000/192000 Hz, and
  * es8389_config_sample() looks it up by Ratio = bits * 4 together with
  * MCLK = rate * bits * 4. At 16 bit, 22050 Hz asks for Ratio 64 @ 1411200 Hz,
@@ -189,11 +189,8 @@
  * 44100 Hz), so get_coeff() fails and es8389_config_sample() returns
  * ESP_CODEC_DEV_NOT_SUPPORT; 16000 Hz resolves to Ratio 64 @ 1024000 Hz,
  * which is present, and is the rate verified on ES8389 hardware.
- * This BSP currently passes use_mclk = true, which makes es8389_set_fs()
- * skip that lookup entirely (and it discards its return value anyway), but a
- * rate outside the table still has no defined codec clock programming - so
- * the default must stay a table rate for BCLK-clocked consumers and for the
- * pending TDM work. */
+ * Both logical codec devices use the BCLK path with no_dac_ref=true, so the
+ * 16-bit x2 request is Ratio 32 @ 512000 Hz and resolves exactly. */
 #define BSP_I2S_SAMPLE_RATE                    16000
 #define BSP_I2S_SLOT_MODE                      I2S_SLOT_MODE_STEREO
 #define BSP_AUDIO_SPEAKER_CODEC                ES8389
@@ -330,7 +327,17 @@ typedef struct {
     uint8_t common_status0;
     uint8_t common_status1;
     uint16_t battery_mv;
+    /** TG28 SOC estimate; only meaningful when fuel_gauge_valid is true
+     *  (a programmed battery model). Treat it as meaningless data
+     *  otherwise - never convert battery_mv into a percentage instead. */
     uint8_t battery_percent;
+    /** True only after a battery model was successfully programmed in
+     *  this boot (BSP reference default or a runtime override). */
+    bool fuel_gauge_valid;
+    /** True while the active valid model is the BSP reference default
+     *  (vendor generic 4.2 V-class): SOC is reference accuracy, not
+     *  per-battery calibrated. False means a custom model (or none). */
+    bool fuel_gauge_reference_model;
     bool battery_present;
     bool vbus_present;
     bool charging;
@@ -537,24 +544,57 @@ const char *bsp_power_domain_name(bsp_power_domain_t domain);
 esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable);
 const char *bsp_peripheral_name(bsp_peripheral_t peripheral);
 
-/** Board default input-current limit, applied unattended at boot. With no
- *  battery fitted, VSYS depends entirely on the VBUS->VMID input path,
- *  which starves RF bursts at 100 mA (VMID dips -> DCDC1 input collapse
- *  -> SoC dies; EVT1 incident 2026-08-17). 500 mA (USB 2.0 negotiated
- *  level) is the shipping default for this board, stress-verified from
- *  fresh RESET boots; this is the accepted final setting, not a
- *  temporary workaround. */
-#define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 500
+/** Safe charge-current default (REG62). The register outlives an
+ *  ESP-only reset - the TG28 only resets when it loses both VBUS and
+ *  battery - so bsp_pmic_init() forces this value with a verified
+ *  readback to collapse any target a previous session raised. Raising
+ *  the target afterwards is the application charge controller's
+ *  decision. */
+#define BSP_PMIC_SAFE_CHARGE_CURRENT_MA 50
+
+/** Charge-profile baseline forced (with exact readback verification) by
+ *  bsp_pmic_init(); a mismatch aborts the init. The values follow the
+ *  vendor EVB recipe (manual section 4.5 step 5: 61H=0x02, 63H=0x01,
+ *  64H=0x03) and the Linux reference default: REG61 precharge 50 mA,
+ *  REG63 termination 25 mA with termination enabled, REG64 charge
+ *  voltage 4200 mV. The FAQ requires the charge-voltage register to
+ *  match the fuel-gauge model CV (the built-in reference model is a
+ *  4.2 V-class profile) or the reported SOC jumps. REG64 POR is not
+ *  specified, hence the deterministic program. */
+#define BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV 4200
+#define BSP_PMIC_SAFE_PRECHARGE_CURRENT_MA 50
+#define BSP_PMIC_SAFE_TERMINATION_CURRENT_MA 25
+
+/** Board default input-current limit (REG16), applied and exact-readback
+ *  verified at every bsp_pmic_init(). Relaxed to 2000 mA and aligned with
+ *  the Factory diagnostic image (2026-08-21 user decision). This is a
+ *  register ceiling, not a source capability claim: the TG28 backs the
+ *  actual charge current off under this input limit/VINDPM while the
+ *  system load keeps priority, and firmware cannot classify the C1
+ *  source - PC-port current budgets are NOT guaranteed. PC protection
+ *  lives in the application charge controller's 200 mA default REG62
+ *  ceiling (see the demo svc_power policy). */
+#define BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA 2000
 
 /** TG28_SW access. Init preserves regulator voltage/enable OTP state for the
  *  boot snapshot but clamps REG16 input current from its 1500 mA POR value
- *  to BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA. Runtime requests above that
- *  default are accepted only from callers that have independently verified
- *  the connected source. */
+ *  to BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA, forces the charge-profile
+ *  baseline (REG62/64/61/63, see the BSP_PMIC_SAFE_* constants) with exact
+ *  readback verification, and programs the built-in reference battery model
+ *  best-effort. Runtime requests above the input-limit default are accepted
+ *  only from callers that have independently verified the connected source. */
 esp_err_t bsp_pmic_init(void);
 esp_err_t bsp_pmic_deinit(void);
 esp_err_t bsp_pmic_get_status(bsp_pmic_status_t *status);
 esp_err_t bsp_pmic_get_power_on_source(uint8_t *source);
+
+/** Set the REG61 precharge current (0-200 mA, 25 mA steps). */
+esp_err_t bsp_pmic_set_precharge_current(uint16_t milliamps);
+esp_err_t bsp_pmic_get_precharge_current(uint16_t *milliamps);
+/** Set the REG63 termination current (0-200 mA, 25 mA steps) and the
+ *  termination-enable bit; disabling keeps the current code. */
+esp_err_t bsp_pmic_set_termination_current(uint16_t milliamps, bool enable);
+esp_err_t bsp_pmic_get_termination_current(uint16_t *milliamps, bool *enabled);
 
 /** Read the TG28_SW REG21 power-off-source latch. The register survives while
  *  the TG28 stays supplied (VBUS or battery), so after an unexpected system
@@ -576,8 +616,6 @@ esp_err_t bsp_pmic_set_vindpm(uint16_t millivolts);
 esp_err_t bsp_pmic_get_vindpm(uint16_t *millivolts);
 esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts);
 esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts);
-esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
-                                  size_t count);
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size);
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_t millivolts);
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);
@@ -712,7 +750,6 @@ esp_err_t bsp_led_set(led_indicator_handle_t handle, bool on);
  *  @{
  */
 typedef struct {
-    lvgl_port_cfg_t lvgl_port_cfg;
     uint32_t buffer_size;
     bool double_buffer;
     struct {
@@ -735,6 +772,13 @@ void bsp_display_unlock(void);
 void bsp_display_rotate(lv_display_t *display, lv_display_rotation_t rotation);
 esp_err_t bsp_display_enter_sleep(void);
 esp_err_t bsp_display_exit_sleep(void);
+/** Panel-only variants: sleep the CO5300 (TE gate, backlight, SLPIN/SLPOUT)
+ *  without touching the CST820. Use these for screen-off paths that must
+ *  keep the touch controller responsive (its auto-standby keeps INT wake
+ *  alive); the full variants above deep-sleep the touch controller and
+ *  hard-reset it on exit, which a touch-wake design cannot use. */
+esp_err_t bsp_display_enter_sleep_panel(void);
+esp_err_t bsp_display_exit_sleep_panel(void);
 esp_err_t bsp_display_enter_deep_standby(void);
 esp_err_t bsp_display_exit_deep_standby(void);
 /** @} */

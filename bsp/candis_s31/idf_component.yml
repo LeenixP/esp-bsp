@@ -27,13 +27,12 @@ dependencies:
     override_path: "../../components/tg28_sw"
 
   esp_codec_dev:
-    version: "~1.5"
+    version: "^1.6.2"
     public: true
 
-  espressif/esp_lvgl_port:
-    version: "^2"
+  espressif/esp_lvgl_adapter:
+    version: "^0.5.2"
     public: true
-    override_path: "../../components/esp_lvgl_port"
 
   espressif/esp_lcd_co5300:
     version: "^2.0.3"
