@@ -36,9 +36,16 @@ def select_bsp_config_no_graphic_lib(bsp_path):
 def remove_esp_lvgl_port(bsp_path):
     manager = ManifestManager(bsp_path, 'bsp')
     deps = manager.manifest.dependencies
-    try:
-        del deps["espressif/esp_lvgl_port"]
-    except KeyError:
+    removed = False
+    # BSPs glue LVGL through either esp_lvgl_port or esp_lvgl_adapter; remove
+    # whichever the package carries.
+    for lvgl_glue in ("espressif/esp_lvgl_port", "espressif/esp_lvgl_adapter"):
+        try:
+            del deps[lvgl_glue]
+            removed = True
+        except KeyError:
+            pass
+    if not removed:
         print("{}: could not remove esp_lvgl_port".format(str(bsp_path)))
         return 1
     try:
