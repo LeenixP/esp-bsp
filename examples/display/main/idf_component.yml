@@ -4,3 +4,10 @@ dependencies:
   bsp_selector:
     version: '*'
     override_path: ../../../components/bsp_selector
+  # The image conversion helpers below are provided by esp_lvgl_port's
+  # project_include.cmake; declare it directly so BSPs glued through
+  # esp_lvgl_adapter (which do not pull esp_lvgl_port) still build.
+  espressif/esp_lvgl_port:
+    version: "^2"
+    public: false
+    override_path: ../../../components/esp_lvgl_port

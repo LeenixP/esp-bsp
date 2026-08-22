@@ -26,75 +26,6 @@ static char *TAG = "app_main";
 
 #define LOG_MEM_INFO    (0)
 
-#if defined(BSP_BOARD_CANDIS_S31)
-#define CANDIS_TE_WAIT_TIMEOUT_MS 25
-#define CANDIS_CACHE_LINE_BYTES 64U
-#define CANDIS_FULL_BUFFER_BYTES (BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t))
-#define CANDIS_FULL_BUFFER_PIXELS \
-    ((((CANDIS_FULL_BUFFER_BYTES + CANDIS_CACHE_LINE_BYTES - 1U) / \
-        CANDIS_CACHE_LINE_BYTES) * CANDIS_CACHE_LINE_BYTES) / sizeof(uint16_t))
-
-static SemaphoreHandle_t s_te_sem;
-static uint32_t s_te_wait_count;
-static uint64_t s_te_wait_total_us;
-
-static void IRAM_ATTR candis_te_isr(void *arg)
-{
-    BaseType_t need_yield = pdFALSE;
-    xSemaphoreGiveFromISR((SemaphoreHandle_t)arg, &need_yield);
-    if (need_yield == pdTRUE) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static esp_err_t candis_te_gate_init(void)
-{
-    s_te_sem = xSemaphoreCreateBinary();
-    if (s_te_sem == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    const gpio_config_t config = {
-        .pin_bit_mask = BIT64(BSP_LCD_TE),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
-    };
-    esp_err_t error = gpio_config(&config);
-    if (error != ESP_OK) {
-        return error;
-    }
-
-    error = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    if (error != ESP_OK && error != ESP_ERR_INVALID_STATE) {
-        return error;
-    }
-    return gpio_isr_handler_add(BSP_LCD_TE, candis_te_isr, s_te_sem);
-}
-
-static void candis_te_wait_cb(lv_event_t *event)
-{
-    (void)event;
-    while (xSemaphoreTake(s_te_sem, 0) == pdTRUE) {
-    }
-
-    const int64_t start_us = esp_timer_get_time();
-    if (xSemaphoreTake(s_te_sem, pdMS_TO_TICKS(CANDIS_TE_WAIT_TIMEOUT_MS)) != pdTRUE) {
-        ESP_LOGE(TAG, "TE falling-edge wait timed out");
-        return;
-    }
-
-    s_te_wait_total_us += (uint64_t)(esp_timer_get_time() - start_us);
-    ++s_te_wait_count;
-    if ((s_te_wait_count % 120U) == 0U) {
-        ESP_LOGI(TAG, "TE gate waits=%lu avg_wait_us=%llu",
-                 (unsigned long)s_te_wait_count,
-                 (unsigned long long)(s_te_wait_total_us / s_te_wait_count));
-    }
-}
-#endif
-
 void benchmark_end_cb(const lv_demo_benchmark_summary_t *summary)
 {
     for (const lv_demo_benchmark_scene_dsc_t *scene = summary->scenes;
@@ -174,26 +105,6 @@ void app_main(void)
     };
     cfg.lvgl_port_cfg.task_stack = 10000;
     bsp_display_start_with_config(&cfg);
-#elif defined(BSP_BOARD_CANDIS_S31)
-    bsp_display_cfg_t cfg = {
-        .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
-        /* LVGL's S31 PPA backend requires the backing allocation size, not
-         * only its address, to be cache-line aligned. The extra 16 pixels are
-         * padding; the logical draw buffer remains 460x460. */
-        .buffer_size = CANDIS_FULL_BUFFER_PIXELS,
-        .double_buffer = true,
-        .flags = {
-            .buff_dma = false,
-            .buff_spiram = true,
-            .sw_rotate = false,
-        },
-    };
-    cfg.lvgl_port_cfg.task_stack = 10000;
-    lv_display_t *display = bsp_display_start_with_config(&cfg);
-    ESP_ERROR_CHECK(display != NULL ? ESP_OK : ESP_FAIL);
-    lv_display_set_render_mode(display, LV_DISPLAY_RENDER_MODE_FULL);
-    ESP_ERROR_CHECK(candis_te_gate_init());
-    lv_display_add_event_cb(display, candis_te_wait_cb, LV_EVENT_FLUSH_START, NULL);
 #else
     bsp_display_start();
 #endif
