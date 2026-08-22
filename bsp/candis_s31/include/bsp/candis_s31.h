@@ -752,6 +752,10 @@ esp_err_t bsp_led_set(led_indicator_handle_t handle, bool on);
 typedef struct {
     uint32_t buffer_size;
     bool double_buffer;
+    /* With the esp_lvgl_adapter backend these flags follow the cross-BSP
+     * struct convention but only buffer_size is honored: the adapter owns
+     * the draw buffers and selects the TE_SYNC full-frame pipeline when
+     * CONFIG_BSP_LCD_TE_SYNC is enabled. */
     struct {
         unsigned int buff_dma : 1;
         unsigned int buff_spiram : 1;

@@ -109,6 +109,8 @@ menu "Board Support Package (Candis-S31)"
             int "I2S controller"
             default 0
             range 0 2
+            help
+                Controller used by the ES8389 codec interface.
     endmenu
 
     menu "Camera"

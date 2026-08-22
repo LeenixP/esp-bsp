@@ -15,12 +15,15 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_commands.h"
 #include "esp_lcd_touch_cst820.h"
-#include "esp_lv_adapter.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "bsp/candis_s31.h"
+
+#if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
+#include "esp_lv_adapter.h"
+#endif
 
 static const char *TAG = "candis_display";
 
@@ -474,6 +477,7 @@ static lv_display_t *display_lvgl_init(const bsp_display_cfg_t *config)
      * (the 0.5.2 fix that our manual msync patch used to replicate), the
      * TE-gated flush pacing and the LVGL task. CO5300 contract: 460x460,
      * RGB565 byte order handled by the panel driver, TE on GPIO16. */
+#if CONFIG_BSP_LCD_TE_SYNC
     esp_lv_adapter_display_config_t display_config =
         ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_TE_DEFAULT_CONFIG(
             s_display.panel, s_display.io,
@@ -483,6 +487,13 @@ static lv_display_t *display_lvgl_init(const bsp_display_cfg_t *config)
             CONFIG_BSP_LCD_PIXEL_CLOCK_MHZ * 1000000,
             4 /* QSPI data lines */,
             16 /* bits per pixel */);
+#else
+    esp_lv_adapter_display_config_t display_config =
+        ESP_LV_ADAPTER_DISPLAY_SPI_WITH_PSRAM_DEFAULT_CONFIG(
+            s_display.panel, s_display.io,
+            BSP_LCD_H_RES, BSP_LCD_V_RES,
+            ESP_LV_ADAPTER_ROTATE_0);
+#endif
     /* The TE profile selects TEAR_AVOID_MODE_TE_SYNC, which the adapter
      * hard-maps to LVGL RENDER_MODE_FULL with a single full-frame PSRAM
      * buffer: every invalidate merges into one TE-gated full redraw (see

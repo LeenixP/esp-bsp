@@ -1,16 +1,18 @@
 # ChangeLog
 
-## Unreleased
+## v1.2.0 - 2026-08-22
 
 ### Features
 
 * PMIC: add `bsp_pmic_read_adc_mv()` with the `bsp_pmic_adc_channel_t` channel list (VBAT/TS/VBUS/VSYS/TDIE); channels disabled at the OTP level are enabled for the measurement and restored
 * PMIC: add the load-switch API `bsp_pmic_switch_enable()`/`bsp_pmic_switch_is_enabled()`/`bsp_pmic_switch_name()` with the `bsp_pmic_switch_t` list (`BSP_PMIC_SWITCH_DC1SW`/`BSP_PMIC_SWITCH_DC4SW`), wrapping the tg28_sw switch channels
 * Power: add `bsp_power_set_safe_shutdown_callback()` so an application can release active protocol owners before `bsp_power_safe_state()` parks pins and removes rails
-
 * PMIC: force a deterministic charge-profile baseline with exact readback verification at init (any mismatch aborts): REG62 charge current 50 mA (`BSP_PMIC_SAFE_CHARGE_CURRENT_MA`), REG64 charge voltage 4200 mV (`BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV`; POR unspecified, must match the fuel-gauge model CV per vendor FAQ), REG61 precharge 50 mA and REG63 termination 25 mA with termination enabled (vendor EVB recipe section 4.5 step 5); adds the thin `bsp_pmic_set/get_precharge_current` and `bsp_pmic_set/get_termination_current` wrappers over the existing tg28_sw APIs
 * PMIC: program the vendor generic 4.2 V-class reference fuel-gauge model at init, best-effort (failure logs a warning and leaves the gauge invalid without touching charging). The 128-byte table in `src/bsp_pmic_reference_model.c` is verbatim GPL-origin data - not Apache-2.0 - and replacing it with a properly licensed cell-specific model is an upstream/external-release blocker; `bsp_pmic_program_battery_model()` remains the runtime override
 * PMIC: `bsp_pmic_status_t` gains `fuel_gauge_valid` (true only while the TG28 SOC estimate is backed by a programmed model; no voltage-to-percent substitution when false) and `fuel_gauge_reference_model` (true = the active valid model is the BSP reference default, SOC is reference accuracy, never per-battery calibrated); model validity is dropped before a runtime override attempt and on init failure/deinit so a partial or failed download can never be reported valid
+* PMIC: add the `BSP_PMIC_CPUSLDO` rail enum, following the tg28_sw 0.3.0 rail table (unconnected on this board, kept off); rail count is now thirteen
+* RTC: pass `backup_charge_enable = false` explicitly at driver creation (rx8130ce 0.3.0 config field); Candis-S31 uses a primary backup cell
+* Power: select the board's TS input through the generalized `tg28_sw_set_ts_config` API (external fixed TS, current source off)
 
 ### Fixed
 
@@ -21,23 +23,15 @@
 * Interrupts: the shared PMIC/RTC line on GPIO2 is now level-triggered (`GPIO_INTR_LOW_LEVEL`) instead of falling-edge; an event asserted while the other device still holds the line low no longer goes unnoticed. The ISR masks the line and `bsp_shared_irq_service()` re-arms it after draining both devices. Re-registering a callback now replaces the previous handler instead of failing
 * Power: make safe-state and peripheral shutdown best-effort so a failed GPIO/I2C step cannot skip later rails; invoke the application teardown callback first, remove display power in VCI → VBAT → ALDO1 order, park camera/display/touch/audio/SD/RGB interfaces before rail removal, and report direct-domain state from successful BSP writes instead of a disabled GPIO input buffer
 * Display: send Display-Off and Sleep-In before teardown, park the complete QSPI/control interface after driver deletion, invalidate BSP LVGL handles even when an LVGL removal fails, keep power-safety teardown running, roll touch startup failures back, and reuse the CO5300 driver's 10 ms/150 ms reset timing when leaving deep standby
-* PMIC: clamp the Type-C1 input-current limit to 100 mA during initialization; the board API accepts only the 100 mA baseline or an application-verified 500 mA stage
+* PMIC: force the REG16 input-current limit to `BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA` (2000 mA) with exact readback verification at every init - the register outlives an ESP-only reset, so a limit raised by a previous session is collapsed before a weak source can be plugged in. The value is a register ceiling, not a source capability claim; requests above the default are accepted only from callers that have independently verified the connected source
 * USB Host: drop the Type-C2 boost on every stop path, including client, event-task, and uninstall failures; terminal Type-C teardown no longer retains a controller handle after its supply is removed
 * Interrupts: attempt both shared-line devices and re-arm GPIO2 even when either LP-I2C drain fails, preserving the first error without permanently masking later PMIC/RTC events
 
-## v1.2.0 - 2026-07-31
-
-### Features
-
-* PMIC: add the `BSP_PMIC_CPUSLDO` rail enum, following the tg28_sw 0.3.0 rail table (unconnected on this board, kept off); rail count is now thirteen
-* RTC: pass `backup_charge_enable = false` explicitly at driver creation (rx8130ce 0.3.0 config field); Candis-S31 uses a primary backup cell
-* Power: select the board's TS input through the generalized `tg28_sw_set_ts_config` API (external fixed TS, current source off)
-
 ### Notes
 
-* Driver dependencies raised to tg28_sw `^0.3.0`, rx8130ce `^0.3.0`, fusb303b `^0.2.0`
+* Driver dependencies raised to tg28_sw `^0.3.0`, rx8130ce `^0.4.0`, fusb303b `^0.2.0`
 
-## v1.1.0 - 2026-07-31
+…
 
 ### Features
 

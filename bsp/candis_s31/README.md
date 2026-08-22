@@ -11,9 +11,10 @@ management, an RTC, two USB Type-C connectors, an ES8389 audio codec, a DVP
 camera connector, a microSD slot, and one addressable RGB LED.
 
 This BSP follows schematic revision 0.5. The implementation and examples are
-compile-tested with ESP-IDF 6.1, but the first hardware revision has not been
-fabricated yet. GPIO polarity, rail voltage, timing, and peripheral behavior
-must be confirmed during EVT bring-up before the component is released.
+compile-tested with ESP-IDF 6.1, and the EVT1 hardware has completed bring-up
+for the display, touch, audio, storage, USB, RTC, and PMIC domains. Camera
+support is pending a corrected FPC adapter board; treat remaining
+electrical-behavior notes as EVT1-validated unless marked otherwise.
 
 ## Capabilities and dependencies
 
@@ -62,13 +63,20 @@ an unconnected spare.
 
 The TG28 driver can represent the discrete input-current limits
 (100/500/900/1000/1500/2000mA), but this board has fixed Type-C1 Rd and no Rp
-detector. `bsp_pmic_init()` therefore clamps the input to 100mA before other
-PMIC setup, and the public board API accepts only that baseline or an
-application-verified 500mA stage. Charger control separately covers the
-battery constant-current limit (0-200mA in 25mA steps, then 300-1500mA in
-100mA steps) and the discrete termination voltage
-(3900/4000/4100/4200/4350/4400mV). PMIC init also clears latched interrupt
-status before enabling the power-key interrupts.
+detector. `bsp_pmic_init()` therefore forces the REG16 input limit to
+`BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA` (2000 mA) with exact readback
+verification before other PMIC setup. That value is a register ceiling, not a
+source capability claim: the TG28 backs the actual charge current off under
+the input limit/VINDPM while the system load keeps priority, and firmware
+cannot classify the C1 source, so PC-port current budgets are NOT guaranteed
+- PC protection lives in the application charge controller's REG62 charge-current
+ceiling. The public `bsp_pmic_set/get_input_current_limit` accepts the full
+hardware whitelist; requests above the boot default are accepted only from
+callers that have independently verified the connected source. Charger
+control separately covers the battery constant-current limit (0-200mA in
+25mA steps, then 300-1500mA in 100mA steps) and the discrete termination
+voltage (4000/4100/4200/4350/4400mV). PMIC init also clears latched
+interrupt status before enabling the power-key interrupts.
 
 `bsp_pmic_init()` also forces a deterministic charge-profile baseline with
 exact readback verification before any other setup (any mismatch aborts the
@@ -203,7 +211,7 @@ The on-board 2.0-inch CO5300 AMOLED (QSPI, 460x460 active area inside a 470x460 
 - **Sleep:** `bsp_display_enter_sleep()` / `bsp_display_exit_sleep()` put the panel into/out of sleep-in mode and put the CST820 into deep sleep. The touch controller has no wake pin, so `bsp_display_exit_sleep()` resets it over its RST GPIO and re-checks its chip ID.
 - **Deep standby:** `bsp_display_enter_deep_standby()` additionally sends the CO5300 deep-standby command (RAM content lost). After `bsp_display_exit_deep_standby()` the full display pipeline is rebuilt, but LVGL widgets/screens are not recreated automatically; the application must show its screen again (e.g. `lv_screen_load()`).
 - **Rotation:** `bsp_display_rotate()` rotates in software (LVGL rendering). On LVGL 9.5 the touch coordinates follow the display rotation automatically. 90/180-degree rotation may show a small offset on this panel; verify on hardware before relying on it.
-- **TE limitation:** the tearing-effect pin is wired and the panel's TE output is enabled at init, but the QSPI display path cannot use TE for anti-tearing. Avoid fast full-screen scroll animations in the UI.
+- **TE synchronization:** with `CONFIG_BSP_LCD_TE_SYNC` (default y) the LVGL refresh is gated on the panel's tearing-effect output (GPIO16) through the esp_lvgl_adapter TE_SYNC profile: each TE-gated flush transfers the whole frame. At the 48 MHz QSPI limit a full frame takes ~17.6 ms, so full-screen motion tops out at ~30 fps while local animations track the 60 Hz TE beat; sparse, local invalidations keep the UI tear-free. Disable the option only for diagnostics - the adapter then flushes without TE alignment.
 - **Touch is optional:** if the CST820 is missing or fails to initialize, `bsp_display_start()` still succeeds and logs a warning; the display keeps working without touch input.
 
 See [API.md](API.md) for the full function reference.

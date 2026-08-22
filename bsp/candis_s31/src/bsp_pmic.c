@@ -140,11 +140,13 @@ esp_err_t bsp_pmic_init(void)
     }
     if (error == ESP_OK) {
         /* Type-C1 has fixed Rd resistors but no CC-current detector, so
-         * the input limit is set to the accepted 500 mA configured/
-         * default ceiling (BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA) instead
-         * of the 1500 mA POR value - strictly BEFORE the ~1 s
-         * battery-model download, so the source limit is in force while
-         * the gauge subsystem draws its programming current. */
+         * the input limit is forced to the board default ceiling
+         * (BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA, 2000 mA) instead of the
+         * 1500 mA POR value - strictly BEFORE the ~1 s battery-model
+         * download, so the source limit is in force while the gauge
+         * subsystem draws its programming current. The register outlives
+         * an ESP-only reset, so a limit raised by a previous session is
+         * collapsed here before a weak source can be plugged in. */
         error = tg28_sw_set_input_current_limit(
                     s_pmic, BSP_PMIC_SAFE_INPUT_CURRENT_LIMIT_MA);
     }
