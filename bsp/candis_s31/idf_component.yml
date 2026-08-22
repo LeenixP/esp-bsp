@@ -17,7 +17,7 @@ dependencies:
     override_path: "../../components/fusb303b"
 
   espressif/rx8130ce:
-    version: "^0.3.0"
+    version: "^0.4.0"
     public: true
     override_path: "../../components/rx8130ce"
 

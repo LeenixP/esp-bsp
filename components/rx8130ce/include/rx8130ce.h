@@ -340,6 +340,158 @@ esp_err_t rx8130ce_update_irq_enable(rx8130ce_handle_t handle, bool enable);
 esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
         uint8_t *flags);
 
+/**
+ * FOUT clock output selection (FSEL1/FSEL0, appman 14.6.2).
+ *
+ * The values match the FSEL1-FSEL0 encoding of the extension register, so
+ * they can be applied to the register image directly. FOUT stops (Hi-z)
+ * while the main supply is below VDET1 (appman 14.6).
+ */
+typedef enum {
+    RX8130CE_FOUT_32768HZ = 0, /**< 32.768 kHz output (POR default). */
+    RX8130CE_FOUT_1024HZ = 1,  /**< 1024 Hz output. */
+    RX8130CE_FOUT_1HZ = 2,     /**< 1 Hz output; disabled while STOP=1
+                                    (appman 13.3.5 7) note 3). */
+    RX8130CE_FOUT_OFF = 3,     /**< FOUT output disabled. */
+} rx8130ce_fout_t;
+
+/** Time update interrupt period selection (USEL, appman 14.4.1). */
+typedef enum {
+    RX8130CE_UPDATE_IRQ_PER_SECOND = 0, /**< Interrupt once per second (POR default). */
+    RX8130CE_UPDATE_IRQ_PER_MINUTE = 1, /**< Interrupt once per minute. */
+} rx8130ce_update_irq_mode_t;
+
+/**
+ * Long-Timer accumulation mode (TBKE/TBKON, appman 14.2.2 6)).
+ *
+ * Selects on which supply the fixed-cycle timer keeps counting, so the
+ * counter can be used as an operation-time (usage) accumulator across power
+ * modes.
+ */
+typedef enum {
+    RX8130CE_TIMER_COUNT_ALWAYS = 0, /**< Count on both main and backup supply (TBKE=0, POR default). */
+    RX8130CE_TIMER_COUNT_MAIN = 1,   /**< Count only during main-supply (VDD) operation (TBKE=1, TBKON=0). */
+    RX8130CE_TIMER_COUNT_BACKUP = 2, /**< Count only during backup-supply (VBAT) operation (TBKE=1, TBKON=1). */
+} rx8130ce_timer_count_mode_t;
+
+/**
+ * Digital offset step size, in parts-per-million (appman 14.10).
+ *
+ * The offset register applies a signed correction in 3.05e-6 steps;
+ * positive values make the clock run faster. The representable range is
+ * -64..+63 steps (+192.26e-6 to -195.31e-6).
+ */
+#define RX8130CE_DIGITAL_OFFSET_STEP_PPM  3.05f
+#define RX8130CE_DIGITAL_OFFSET_MIN_STEPS (-64)
+#define RX8130CE_DIGITAL_OFFSET_MAX_STEPS (63)
+/** User RAM size in bytes (registers 20h-23h, appman 13.3.2). */
+#define RX8130CE_USER_RAM_SIZE            4
+
+/**
+ * Select the FOUT clock output frequency.
+ *
+ * A 32.768 kHz output is unaffected by the digital offset function; 1 Hz
+ * and 1024 Hz outputs show jitter from it (appman 14.10.1).
+ */
+esp_err_t rx8130ce_set_fout(rx8130ce_handle_t handle, rx8130ce_fout_t frequency);
+
+/** Read back the FOUT clock output selection. */
+esp_err_t rx8130ce_get_fout(rx8130ce_handle_t handle, rx8130ce_fout_t *out_frequency);
+
+/**
+ * Select the time update interrupt period (second or minute update).
+ *
+ * The /IRQ routing itself is controlled by rx8130ce_update_irq_enable().
+ */
+esp_err_t rx8130ce_set_update_irq_mode(rx8130ce_handle_t handle, rx8130ce_update_irq_mode_t mode);
+
+/** Read back the time update interrupt period selection. */
+esp_err_t rx8130ce_get_update_irq_mode(rx8130ce_handle_t handle, rx8130ce_update_irq_mode_t *out_mode);
+
+/**
+ * Select on which supply the fixed-cycle timer counts (Long-Timer mode).
+ *
+ * With a main- or backup-only selection the timer doubles as an
+ * operation-time accumulator for the selected power domain.
+ */
+esp_err_t rx8130ce_set_timer_count_mode(rx8130ce_handle_t handle, rx8130ce_timer_count_mode_t mode);
+
+/** Read back the Long-Timer accumulation mode. */
+esp_err_t rx8130ce_get_timer_count_mode(rx8130ce_handle_t handle, rx8130ce_timer_count_mode_t *out_mode);
+
+/**
+ * Pause or resume the fixed-cycle timer countdown (TSTP, appman 14.2.2 7)).
+ *
+ * Pausing keeps the current count value; resuming restarts from it. TSTP is
+ * only effective while the timer runs (TE=1), the time counter is not
+ * stopped (STOP=0) and the count mode accumulates both supplies (TBKE=0);
+ * otherwise the bit is ignored by the hardware.
+ */
+esp_err_t rx8130ce_timer_pause(rx8130ce_handle_t handle, bool pause);
+
+/**
+ * Write the battery-backed user RAM (registers 20h-23h).
+ *
+ * @param offset Byte offset into the 4-byte user RAM, 0-3.
+ * @param length Byte count; offset + length must not exceed
+ *        RX8130CE_USER_RAM_SIZE.
+ */
+esp_err_t rx8130ce_write_user_ram(rx8130ce_handle_t handle, uint8_t offset,
+                                  const uint8_t *data, size_t length);
+
+/** Read the battery-backed user RAM (registers 20h-23h). */
+esp_err_t rx8130ce_read_user_ram(rx8130ce_handle_t handle, uint8_t offset,
+                                 uint8_t *data, size_t length);
+
+/**
+ * Encode a digital offset value into the raw 30h register image.
+ *
+ * Pure helper; validates the step range. The correction is applied by the
+ * hardware every 10 seconds when enabled.
+ *
+ * @param enable DTE bit: apply the offset when true.
+ * @param offset_steps Signed correction in 3.05e-6 steps,
+ *        RX8130CE_DIGITAL_OFFSET_MIN_STEPS..RX8130CE_DIGITAL_OFFSET_MAX_STEPS;
+ *        positive makes the clock run faster.
+ * @param out_register Receives the register value.
+ */
+esp_err_t rx8130ce_digital_offset_encode(bool enable, int8_t offset_steps,
+        uint8_t *out_register);
+
+/** Decode a raw 30h register image into enable state and signed steps. */
+void rx8130ce_digital_offset_decode(uint8_t register_value, bool *out_enabled,
+                                    int8_t *out_offset_steps);
+
+/** Program the digital offset register (30h). See rx8130ce_digital_offset_encode(). */
+esp_err_t rx8130ce_set_digital_offset(rx8130ce_handle_t handle, bool enable,
+                                      int8_t offset_steps);
+
+/** Read back the digital offset register (30h). */
+esp_err_t rx8130ce_get_digital_offset(rx8130ce_handle_t handle, bool *out_enabled,
+                                      int8_t *out_offset_steps);
+
+/**
+ * Raw register read fallback (user registers 10h-23h and 30h only).
+ *
+ * The application manual restricts access to the documented user registers
+ * (13.2.1 note *6); the start address is validated against them. Reads
+ * follow the device auto-increment wrap-around (1Fh wraps to 10h, 2Fh to
+ * 20h, 3Fh to 30h; appman 14.12.4). Use this for feature blocks without a
+ * structured API (SMPTSEL/RSVSEL/BFVSEL power-detection tuning and similar).
+ */
+esp_err_t rx8130ce_read_registers(rx8130ce_handle_t handle, uint8_t start_register,
+                                  uint8_t *data, size_t length);
+
+/**
+ * Raw register write fallback (user registers 10h-23h and 30h only).
+ *
+ * See rx8130ce_read_registers() for the address policy. Writes a single
+ * register; no driver state is updated, so prefer the structured APIs
+ * whenever one exists for the target field.
+ */
+esp_err_t rx8130ce_write_register(rx8130ce_handle_t handle, uint8_t reg,
+                                  uint8_t value);
+
 #ifdef __cplusplus
 }
 #endif

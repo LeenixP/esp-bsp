@@ -253,4 +253,29 @@ void app_main(void)
     rx8130ce_timer_encode(&max_slow, timer_registers, &tsel_bits);
     assert(timer_registers[0] == 0xFF && timer_registers[1] == 0xFF &&
            tsel_bits == RX8130CE_TIMER_SOURCE_1_3600HZ);
+
+    /* Digital offset encode: range, sign regions, enable bit. */
+    uint8_t offset_register = 0;
+    assert(rx8130ce_digital_offset_encode(true, 0, &offset_register) == ESP_OK &&
+           offset_register == 0x80);
+    assert(rx8130ce_digital_offset_encode(true, 63, &offset_register) == ESP_OK &&
+           offset_register == (0x80 | 63));
+    assert(rx8130ce_digital_offset_encode(true, -64, &offset_register) == ESP_OK &&
+           offset_register == (0x80 | 64));
+    assert(rx8130ce_digital_offset_encode(false, -1, &offset_register) == ESP_OK &&
+           offset_register == 127);
+    assert(rx8130ce_digital_offset_encode(true, 64, &offset_register) == ESP_ERR_INVALID_ARG);
+    assert(rx8130ce_digital_offset_encode(true, -65, &offset_register) == ESP_ERR_INVALID_ARG);
+    assert(rx8130ce_digital_offset_encode(true, 0, NULL) == ESP_ERR_INVALID_ARG);
+
+    /* Digital offset decode: exact round-trips across both sign regions. */
+    bool offset_enabled = false;
+    int8_t offset_steps = 0;
+    for (int8_t steps = -64; steps <= 63; steps++) {
+        assert(rx8130ce_digital_offset_encode(true, steps, &offset_register) == ESP_OK);
+        rx8130ce_digital_offset_decode(offset_register, &offset_enabled, &offset_steps);
+        assert(offset_enabled && offset_steps == steps);
+    }
+    rx8130ce_digital_offset_decode(0x00, &offset_enabled, &offset_steps);
+    assert(!offset_enabled && offset_steps == 0);
 }

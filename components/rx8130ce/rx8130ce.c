@@ -36,7 +36,7 @@
 #define RX8130CE_INTERRUPT_FLAGS      (RX8130CE_FLAG_UF | RX8130CE_FLAG_TF | RX8130CE_FLAG_AF)
 #define RX8130CE_TIMEOUT_MS           100
 #define RX8130CE_BACKUP_RECOVERY_MS   35
-/* Oscillation start time t_str is 1.0 s max (appman 9.1); appman 10.2
+/* Oscillation start time t_str is 1.0 s max (appman 8); appman 10.2
  * requires waiting it out before initializing when VLF=1. */
 #define RX8130CE_OSCILLATOR_START_MS  1100
 
@@ -376,7 +376,9 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
         config = &default_config;
     }
     ESP_RETURN_ON_FALSE(config->device_address <= 0x7F &&
-                        config->scl_speed_hz > 0, ESP_ERR_INVALID_ARG, TAG,
+                        config->scl_speed_hz > 0 &&
+                        config->scl_speed_hz <= RX8130CE_I2C_CLOCK_HZ,
+                        ESP_ERR_INVALID_ARG, TAG,
                         "invalid I2C configuration");
 
     rx8130ce_handle_t handle = calloc(1, sizeof(*handle));
@@ -916,6 +918,259 @@ esp_err_t rx8130ce_get_and_clear_interrupts(rx8130ce_handle_t handle,
 {
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = get_and_clear_interrupts_locked(handle, flags);
+    unlock_device(handle);
+    return error;
+}
+
+#define RX8130CE_EXTENSION_FSEL_MASK      0xC0
+#define RX8130CE_EXTENSION_USEL           (1U << 5)
+#define RX8130CE_CONTROL0_TSTP            (1U << 2)
+#define RX8130CE_CONTROL0_TBKON           (1U << 1)
+#define RX8130CE_CONTROL0_TBKE            (1U << 0)
+#define RX8130CE_DIGITAL_OFFSET_DTE       (1U << 7)
+#define RX8130CE_DIGITAL_OFFSET_L_MASK    0x7F
+#define RX8130CE_REG_USER_REGISTERS_FIRST 0x10
+#define RX8130CE_REG_USER_REGISTERS_LAST  0x23
+
+static bool rx8130ce_reg_is_user_accessible(uint8_t reg)
+{
+    /* appman 13.2.1 note *6: only the documented user registers (10h-23h
+     * and 30h) may be accessed; the manufacturer registers are excluded. */
+    return (reg >= RX8130CE_REG_USER_REGISTERS_FIRST && reg <= RX8130CE_REG_USER_REGISTERS_LAST) ||
+           reg == RX8130CE_REG_DIGITAL_OFFSET;
+}
+
+/* The caller must already hold the device lock. */
+static esp_err_t update_bits_locked(rx8130ce_handle_t handle, uint8_t reg,
+                                    uint8_t mask, uint8_t value)
+{
+    uint8_t image = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_read(handle, reg, &image, 1), TAG,
+                        "register read failed");
+    image = (uint8_t)((image & ~mask) | (value & mask));
+    return rx8130ce_write(handle, reg, &image, 1);
+}
+
+esp_err_t rx8130ce_set_fout(rx8130ce_handle_t handle, rx8130ce_fout_t frequency)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(frequency >= RX8130CE_FOUT_32768HZ && frequency <= RX8130CE_FOUT_OFF,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid FOUT selection");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_EXTENSION,
+                                               RX8130CE_EXTENSION_FSEL_MASK,
+                                               (uint8_t)frequency << 6);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_fout(rx8130ce_handle_t handle, rx8130ce_fout_t *out_frequency)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && out_frequency != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t extension = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_EXTENSION, &extension, 1);
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "extension register read failed");
+    *out_frequency = (rx8130ce_fout_t)((extension & RX8130CE_EXTENSION_FSEL_MASK) >> 6);
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_set_update_irq_mode(rx8130ce_handle_t handle, rx8130ce_update_irq_mode_t mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(mode >= RX8130CE_UPDATE_IRQ_PER_SECOND && mode <= RX8130CE_UPDATE_IRQ_PER_MINUTE,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid update interrupt mode");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_EXTENSION,
+                                               RX8130CE_EXTENSION_USEL,
+                                               (uint8_t)mode << 5);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_update_irq_mode(rx8130ce_handle_t handle, rx8130ce_update_irq_mode_t *out_mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && out_mode != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t extension = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_EXTENSION, &extension, 1);
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "extension register read failed");
+    *out_mode = (extension & RX8130CE_EXTENSION_USEL) != 0 ?
+                RX8130CE_UPDATE_IRQ_PER_MINUTE : RX8130CE_UPDATE_IRQ_PER_SECOND;
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_set_timer_count_mode(rx8130ce_handle_t handle, rx8130ce_timer_count_mode_t mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(mode >= RX8130CE_TIMER_COUNT_ALWAYS && mode <= RX8130CE_TIMER_COUNT_BACKUP,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid timer count mode");
+    /* appman 14.2.2 6): ALWAYS = TBKE 0 / TBKON don't care (driven 0),
+     * MAIN = TBKE 1 / TBKON 0, BACKUP = TBKE 1 / TBKON 1. */
+    const uint8_t bits = mode == RX8130CE_TIMER_COUNT_ALWAYS ? 0 :
+                         (RX8130CE_CONTROL0_TBKE |
+                          (mode == RX8130CE_TIMER_COUNT_BACKUP ? RX8130CE_CONTROL0_TBKON : 0));
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_CONTROL0,
+                                               RX8130CE_CONTROL0_TBKE | RX8130CE_CONTROL0_TBKON,
+                                               bits);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_timer_count_mode(rx8130ce_handle_t handle, rx8130ce_timer_count_mode_t *out_mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && out_mode != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t control0 = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_CONTROL0, &control0, 1);
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "control register read failed");
+    if ((control0 & RX8130CE_CONTROL0_TBKE) == 0) {
+        *out_mode = RX8130CE_TIMER_COUNT_ALWAYS;
+    } else {
+        *out_mode = (control0 & RX8130CE_CONTROL0_TBKON) != 0 ?
+                    RX8130CE_TIMER_COUNT_BACKUP : RX8130CE_TIMER_COUNT_MAIN;
+    }
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_timer_pause(rx8130ce_handle_t handle, bool pause)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_CONTROL0,
+                                               RX8130CE_CONTROL0_TSTP,
+                                               pause ? RX8130CE_CONTROL0_TSTP : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_write_user_ram(rx8130ce_handle_t handle, uint8_t offset,
+                                  const uint8_t *data, size_t length)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(data != NULL && length > 0, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid write buffer");
+    ESP_RETURN_ON_FALSE(offset < RX8130CE_USER_RAM_SIZE &&
+                        length <= RX8130CE_USER_RAM_SIZE - offset,
+                        ESP_ERR_INVALID_SIZE, TAG, "user RAM range exceeded");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_write(handle, RX8130CE_REG_RAM + offset, data, length);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_read_user_ram(rx8130ce_handle_t handle, uint8_t offset,
+                                 uint8_t *data, size_t length)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(data != NULL && length > 0, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid read buffer");
+    ESP_RETURN_ON_FALSE(offset < RX8130CE_USER_RAM_SIZE &&
+                        length <= RX8130CE_USER_RAM_SIZE - offset,
+                        ESP_ERR_INVALID_SIZE, TAG, "user RAM range exceeded");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_RAM + offset, data, length);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_digital_offset_encode(bool enable, int8_t offset_steps,
+        uint8_t *out_register)
+{
+    ESP_RETURN_ON_FALSE(out_register != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid output pointer");
+    ESP_RETURN_ON_FALSE(offset_steps >= RX8130CE_DIGITAL_OFFSET_MIN_STEPS &&
+                        offset_steps <= RX8130CE_DIGITAL_OFFSET_MAX_STEPS,
+                        ESP_ERR_INVALID_ARG, TAG, "offset steps out of range");
+    /* appman 14.10.1: positive offsets are L = steps; negative offsets are
+     * L = 128 + steps (two regions of the 7-bit L field). */
+    const uint8_t field = offset_steps >= 0 ? (uint8_t)offset_steps
+                          : (uint8_t)(128 + offset_steps);
+    *out_register = (enable ? RX8130CE_DIGITAL_OFFSET_DTE : 0) |
+                    (field & RX8130CE_DIGITAL_OFFSET_L_MASK);
+    return ESP_OK;
+}
+
+void rx8130ce_digital_offset_decode(uint8_t register_value, bool *out_enabled,
+                                    int8_t *out_offset_steps)
+{
+    const uint8_t field = register_value & RX8130CE_DIGITAL_OFFSET_L_MASK;
+    if (out_enabled != NULL) {
+        *out_enabled = (register_value & RX8130CE_DIGITAL_OFFSET_DTE) != 0;
+    }
+    if (out_offset_steps != NULL) {
+        *out_offset_steps = field <= (uint8_t)RX8130CE_DIGITAL_OFFSET_MAX_STEPS ?
+                            (int8_t)field : (int8_t)(field - 128);
+    }
+}
+
+esp_err_t rx8130ce_set_digital_offset(rx8130ce_handle_t handle, bool enable,
+                                      int8_t offset_steps)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    uint8_t image = 0;
+    ESP_RETURN_ON_ERROR(rx8130ce_digital_offset_encode(enable, offset_steps, &image),
+                        TAG, "invalid digital offset");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_write(handle, RX8130CE_REG_DIGITAL_OFFSET, &image, 1);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_get_digital_offset(rx8130ce_handle_t handle, bool *out_enabled,
+                                      int8_t *out_offset_steps)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(out_enabled != NULL || out_offset_steps != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "no output requested");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t image = 0;
+    const esp_err_t error = rx8130ce_read(handle, RX8130CE_REG_DIGITAL_OFFSET, &image, 1);
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "digital offset register read failed");
+    rx8130ce_digital_offset_decode(image, out_enabled, out_offset_steps);
+    return ESP_OK;
+}
+
+esp_err_t rx8130ce_read_registers(rx8130ce_handle_t handle, uint8_t start_register,
+                                  uint8_t *data, size_t length)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(data != NULL && length > 0, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid read buffer");
+    ESP_RETURN_ON_FALSE(rx8130ce_reg_is_user_accessible(start_register),
+                        ESP_ERR_INVALID_ARG, TAG, "not a user register address");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_read(handle, start_register, data, length);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t rx8130ce_write_register(rx8130ce_handle_t handle, uint8_t reg,
+                                  uint8_t value)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG,
+                        "invalid device handle");
+    ESP_RETURN_ON_FALSE(rx8130ce_reg_is_user_accessible(reg),
+                        ESP_ERR_INVALID_ARG, TAG, "not a user register address");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = rx8130ce_write(handle, reg, &value, 1);
     unlock_device(handle);
     return error;
 }

@@ -4,22 +4,34 @@ This component provides an ESP-IDF C driver for the Epson RX8130CE real-time
 clock. It uses an existing `i2c_master` bus and does not own the bus, interrupt
 GPIO, backup supply, or board power policy.
 
-The current API covers the functions needed by board bring-up:
+The API covers the complete user-facing feature set of the application
+manual:
 
 - create and remove an RX8130CE device on an existing I2C bus;
 - initialize every user register after a voltage-loss (`VLF`) event;
 - validate, read, and set calendar time from 2000 through 2099;
 - program and read back the minute/hour/day/weekday alarm and switch its
   `/IRQ` output (`AIE`);
-- program, start, stop, and read back the fixed-cycle wake-up timer and
-  switch its `/IRQ` output (`TIE`);
-- switch the time update interrupt output (`UIE`);
+- program, start, stop, pause, and read back the fixed-cycle wake-up timer,
+  switch its `/IRQ` output (`TIE`), and select the Long-Timer accumulation
+  mode (count on main supply, backup supply, or both);
+- switch the time update interrupt output (`UIE`) and select its period
+  (one second or one minute, `USEL`);
+- select the FOUT clock output (32.768 kHz, 1024 Hz, 1 Hz, or off);
+- read and write the battery-backed 4-byte user RAM (20h-23h);
+- program the digital offset register for clock-accuracy calibration (30h,
+  signed 3.05 ppm steps);
 - decode retained voltage, reset, alarm, timer, and update flags;
-- read and clear the three interrupt flags that can assert `/IRQ`.
+- read and clear the three interrupt flags that can assert `/IRQ`;
+- raw read/write access to the documented user registers (10h-23h, 30h) for
+  the few fields without a structured API (the power-detection tuning bits
+  SMPTSEL/RSVSEL/BFVSEL).
 
-Clock output and digital offset are intentionally outside the current API.
-Those features need application-specific choices and should be added with
-tests when a board uses them.
+The alarm hardware compares either a day of month or one weekday; matching
+multiple weekdays at once (supported by the hardware's weekday bit map) is
+not expressible through `rx8130ce_alarm_t` and can be reached through the
+raw register accessors. `rx8130ce_delete()` must not race with calls from
+other tasks: finish or join every concurrent user before deleting.
 
 The backup supply policy is a board-level choice made at device creation.
 The driver always sets `INIEN` (automatic supply switchover is enabled),
