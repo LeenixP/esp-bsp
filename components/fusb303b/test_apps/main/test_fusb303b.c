@@ -12,9 +12,10 @@
 #include "fusb303b.h"
 
 /* The pins only have to exist on the target: no case below starts an I2C
- * transfer, so the tests run on a board without a FUSB303B. */
-#define TEST_I2C_SCL_IO  33
-#define TEST_I2C_SDA_IO  34
+ * transfer, so the tests run on a board without a FUSB303B. Defaults match
+ * the Candis-S31 main I2C bus; override in menuconfig for other boards. */
+#define TEST_I2C_SCL_IO  CONFIG_FUSB303B_TEST_I2C_SCL
+#define TEST_I2C_SDA_IO  CONFIG_FUSB303B_TEST_I2C_SDA
 
 TEST_CASE("identity check accepts the FUSB303B version and type",
           "[fusb303b]")
