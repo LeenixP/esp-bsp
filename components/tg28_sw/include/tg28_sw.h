@@ -25,6 +25,13 @@ extern "C" {
 #define TG28_SW_I2C_ADDRESS_DEFAULT  0x34
 #define TG28_SW_I2C_CLOCK_HZ         400000
 
+/** Byte size of the REGA1 fuel-gauge battery-model window. The hardware
+ * design guide (section 6.2) writes exactly 128 battery parameters to
+ * regA1H, one byte per write, in order; datasheet 6.13.2.86. Models must
+ * be exactly this size: shorter models leave the gauge with a truncated
+ * table, longer ones write past the window. */
+#define TG28_SW_BATTERY_MODEL_SIZE   128
+
 /* Power-key interrupt enable bits in IRQ bank 1 (REG41 bits 3:0). They map
  * one-to-one onto TG28_SW_IRQ_PONPE/PONNE/PONLP/PONSP of tg28_sw_irq_t. */
 #define TG28_SW_POWER_KEY_IRQ_POSITIVE_EDGE  (1U << 0)
@@ -32,6 +39,17 @@ extern "C" {
 #define TG28_SW_POWER_KEY_IRQ_LONG_PRESS      (1U << 2)
 #define TG28_SW_POWER_KEY_IRQ_SHORT_PRESS     (1U << 3)
 #define TG28_SW_POWER_KEY_IRQ_ALL             0x0F
+
+/* Latched power-off source bits of REG21 (datasheet 6.13.2.19), as
+ * returned by tg28_sw_get_power_off_source(). */
+#define TG28_SW_POWER_OFF_SOURCE_PWRON_MODE  (1U << 0) /**< PWRON low beyond OFFLEVEL in PWRON mode */
+#define TG28_SW_POWER_OFF_SOURCE_SOFTWARE    (1U << 1) /**< Software soft-PWROFF command */
+#define TG28_SW_POWER_OFF_SOURCE_EN_MODE     (1U << 2) /**< EN held low in EN mode */
+#define TG28_SW_POWER_OFF_SOURCE_VSYS_UV     (1U << 3) /**< VSYS under-voltage */
+#define TG28_SW_POWER_OFF_SOURCE_VBUS_OV     (1U << 4) /**< VBUS over-voltage */
+#define TG28_SW_POWER_OFF_SOURCE_DCDC_UV     (1U << 5) /**< DCDC under-voltage */
+#define TG28_SW_POWER_OFF_SOURCE_DCDC_OV     (1U << 6) /**< DCDC over-voltage */
+#define TG28_SW_POWER_OFF_SOURCE_DIE_OT      (1U << 7) /**< Die over-temperature */
 
 /** Opaque TG28 switch-charger device handle. */
 typedef struct tg28_sw_device_t *tg28_sw_handle_t;
@@ -149,6 +167,229 @@ typedef enum {
     TG28_SW_ADC_CHANNEL_COUNT,
 } tg28_sw_adc_channel_t;
 
+/** Watchdog timeout behavior on expiry (REG19 bits5:4, datasheet 6.13.2.15). */
+typedef enum {
+    /** Send the WDEXP IRQ only. */
+    TG28_SW_WATCHDOG_ACTION_IRQ_ONLY = 0,
+    /** Send the WDEXP IRQ and restart the system. */
+    TG28_SW_WATCHDOG_ACTION_IRQ_RESET = 1,
+    /** Send the WDEXP IRQ, restart the system, and pull PWROK low for 1 s. */
+    TG28_SW_WATCHDOG_ACTION_IRQ_RESET_PWROK = 2,
+    /** Send the WDEXP IRQ, restart the system, and power off then re-power
+     * the DCDC/LDO rails. */
+    TG28_SW_WATCHDOG_ACTION_IRQ_RESET_PWRCYCLE = 3,
+} tg28_sw_watchdog_action_t;
+
+/** Watchdog timer period (REG19 bits2:0, datasheet 6.13.2.15). */
+typedef enum {
+    TG28_SW_WATCHDOG_PERIOD_1S = 0,
+    TG28_SW_WATCHDOG_PERIOD_2S,
+    TG28_SW_WATCHDOG_PERIOD_4S,
+    TG28_SW_WATCHDOG_PERIOD_8S,
+    TG28_SW_WATCHDOG_PERIOD_16S,
+    TG28_SW_WATCHDOG_PERIOD_32S,
+    TG28_SW_WATCHDOG_PERIOD_64S,
+    TG28_SW_WATCHDOG_PERIOD_128S,
+} tg28_sw_watchdog_period_t;
+
+/** Watchdog configuration (REG18 bit0 enable, REG19, datasheet 6.13.2.14-15). */
+typedef struct {
+    bool enable;
+    tg28_sw_watchdog_period_t period;
+    tg28_sw_watchdog_action_t action;
+} tg28_sw_watchdog_config_t;
+
+/**
+ * Battery temperature-sense thresholds (REG52-REG57, datasheet 6.13.2.48-53;
+ * the charger reacts to them per 6.7.4.4). The four limit fields hold the TS
+ * pin voltage in millivolts: charging pauses below vltf_charge_mv or above
+ * vhtf_charge_mv, and discharge pauses below vltf_work_mv or above
+ * vhtf_work_mv. Their mapping to temperatures follows the NTC network
+ * transfer function (default codes place the charge window around 0-45 C
+ * with a 10 kOhm NTC driven by 50 uA, datasheet Table 6-5).
+ *
+ * Encoding: vltf_charge_mv and vltf_work_mv take 32 mV steps (REG54/REG56),
+ * vhtf_charge_mv and vhtf_work_mv take 2 mV steps (REG55/REG57);
+ * hyst_low_to_normal_mv takes 16 mV steps (REG52) and
+ * hyst_high_to_normal_mv takes 4 mV steps (REG53). Any value that is not
+ * exactly representable returns ESP_ERR_INVALID_ARG.
+ */
+typedef struct {
+    uint16_t vltf_charge_mv;
+    uint16_t vhtf_charge_mv;
+    uint16_t vltf_work_mv;
+    uint16_t vhtf_work_mv;
+    uint16_t hyst_low_to_normal_mv;
+    uint16_t hyst_high_to_normal_mv;
+} tg28_sw_ts_thresholds_t;
+
+/** JEITA CV adjustment step (REG59 bits3:2/1:0, datasheet 6.13.2.55). */
+typedef enum {
+    /** Keep the programmed charge voltage. */
+    TG28_SW_JEITA_CV_ADJUST_NONE = 0,
+    /** One CV gear lower than the programmed charge voltage. */
+    TG28_SW_JEITA_CV_ADJUST_ONE_GEAR = 1,
+    /** Two CV gears lower than the programmed charge voltage. */
+    TG28_SW_JEITA_CV_ADJUST_TWO_GEARS = 2,
+} tg28_sw_jeita_cv_adjust_t;
+
+/**
+ * JEITA standard configuration (REG58-REG5B, datasheet 6.13.2.54-57).
+ *
+ * cool_mv (REG5A) is the T2 boundary in 16 mV steps and warm_mv (REG5B) the
+ * T3 boundary in 8 mV steps; both are TS pin voltages, so their mapping to
+ * temperatures depends on the NTC network. In the cool zone the charge
+ * current may be halved and the CV lowered per cool_current_half /
+ * cool_cv_adjust; the warm zone applies warm_current_half / warm_cv_adjust.
+ * The T1/T4 window limits live in tg28_sw_ts_thresholds_t.
+ */
+typedef struct {
+    bool enable;
+    bool cool_current_half;
+    tg28_sw_jeita_cv_adjust_t cool_cv_adjust;
+    bool warm_current_half;
+    tg28_sw_jeita_cv_adjust_t warm_cv_adjust;
+    uint16_t cool_mv;
+    uint16_t warm_mv;
+} tg28_sw_jeita_config_t;
+
+/** Thermal regulation threshold (REG65 bits1:0, datasheet 6.13.2.64). */
+typedef enum {
+    TG28_SW_THERMAL_REGULATION_60C = 0,
+    TG28_SW_THERMAL_REGULATION_80C,
+    TG28_SW_THERMAL_REGULATION_100C,
+    TG28_SW_THERMAL_REGULATION_120C,
+} tg28_sw_thermal_regulation_t;
+
+/** Pre-charge safety timer duration (REG67 bits1:0, datasheet 6.13.2.65). */
+typedef enum {
+    TG28_SW_PRECHARGE_TIMER_40MIN = 0,
+    TG28_SW_PRECHARGE_TIMER_50MIN,
+    TG28_SW_PRECHARGE_TIMER_60MIN,
+    TG28_SW_PRECHARGE_TIMER_70MIN,
+} tg28_sw_precharge_timer_t;
+
+/** CC/CV charge-cycle safety timer duration (REG67 bits5:4, datasheet 6.13.2.65). */
+typedef enum {
+    TG28_SW_CHARGE_TIMER_5H = 0,
+    TG28_SW_CHARGE_TIMER_8H,
+    TG28_SW_CHARGE_TIMER_12H,
+    TG28_SW_CHARGE_TIMER_20H,
+} tg28_sw_charge_timer_t;
+
+/**
+ * Charger safety-timer configuration (REG67, datasheet 6.13.2.65 and
+ * 6.7.4.1). A timer expiry drops the charger into battery safe mode and
+ * raises TG28_SW_IRQ_CHGTE. timer_slow_during_dpm halves the timer speed
+ * while input DPM or thermal regulation limits the current (datasheet
+ * 6.7.3.3).
+ */
+typedef struct {
+    bool precharge_timer_enable;
+    tg28_sw_precharge_timer_t precharge_timer;
+    bool charge_timer_enable;
+    tg28_sw_charge_timer_t charge_timer;
+    bool timer_slow_during_dpm;
+} tg28_sw_charge_timers_t;
+
+/** CHGLED pin display mode (REG69 bits2:1, datasheet 6.13.2.67 and Table 6-6). */
+typedef enum {
+    /** Type A charging indication. */
+    TG28_SW_CHARGE_LED_TYPE_A = 0,
+    /** Type B charging indication. */
+    TG28_SW_CHARGE_LED_TYPE_B = 1,
+    /** Manual output through tg28_sw_charge_led_manual_mode_t. */
+    TG28_SW_CHARGE_LED_MANUAL = 2,
+} tg28_sw_charge_led_mode_t;
+
+/** CHGLED pin manual drive mode (REG69 bits5:4, datasheet 6.13.2.67). */
+typedef enum {
+    TG28_SW_CHARGE_LED_MANUAL_HIZ = 0,
+    /** Blink: low/Hi-z, 25%/75% duty at 1 Hz. */
+    TG28_SW_CHARGE_LED_MANUAL_BLINK_1HZ = 1,
+    /** Blink: low/Hi-z, 25%/75% duty at 4 Hz. */
+    TG28_SW_CHARGE_LED_MANUAL_BLINK_4HZ = 2,
+    TG28_SW_CHARGE_LED_MANUAL_LOW = 3,
+} tg28_sw_charge_led_manual_mode_t;
+
+/**
+ * CHGLED configuration (REG69, datasheet 6.13.2.67). manual_mode only takes
+ * effect while mode is TG28_SW_CHARGE_LED_MANUAL; enable gates the whole
+ * pin function.
+ */
+typedef struct {
+    tg28_sw_charge_led_mode_t mode;
+    tg28_sw_charge_led_manual_mode_t manual_mode;
+    bool enable;
+} tg28_sw_charge_led_config_t;
+
+/**
+ * Power-off policy (REG22/REG23/REG24/REG27, datasheet 6.13.2.20-22,25).
+ *
+ * WARNING: these bits decide when the PMIC shuts itself off. A wrong
+ * combination (for example a VOFF threshold above the battery voltage with
+ * the button source enabled) can make the board impossible to power on or
+ * cause unexpected shutdowns. Restore the OTP/POR defaults unless the
+ * hardware behavior is fully understood.
+ *
+ * voff_mv (REG24) is the battery-voltage power-off threshold: 2600-3300 mV
+ * in 100 mV steps. dcdc_ovp_shutdown (REG23 bit5) gates the 120%/130%
+ * DCDC over-voltage shutdown; dcdc_uvp_shutdown_mask (REG23 bits3:0) gates
+ * the 85% under-voltage shutdown per rail (bit0 = DCDC1 ... bit3 = DCDC4).
+ * The button_pwrkey_off bits (REG22) control whether the die
+ * over-temperature level-2 and the PWRON-beyond-OFFLEVEL sources are
+ * allowed to power off. irqlevel/offlevel/onlevel (REG27) set the PWRON
+ * key timing windows.
+ */
+typedef struct {
+    uint16_t voff_mv;
+    bool dcdc_ovp_shutdown;
+    uint8_t dcdc_uvp_shutdown_mask;
+    bool die_ot_level2_off_enable;
+    bool pwron_offlevel_off_enable;
+    bool button_off_as_restart;
+    uint8_t irqlevel_ms;
+    uint8_t offlevel_ms;
+    uint8_t onlevel_ms;
+} tg28_sw_poweroff_config_t;
+
+/**
+ * Sleep/wakeup policy (REG26, datasheet 6.13.2.24 and 6.5.4.4). The wakeup
+ * and sleep enable bits are write-one-to-clear style (RWLC): setting them
+ * starts the transition, reading reflects the state.
+ */
+typedef struct {
+    bool irq_wakeup_enable;
+    bool pwrok_low_level_wakeup_enable;
+    bool wakeup_voltage_from_before_sleep;
+    bool wakeup_enable;
+    bool sleep_enable;
+} tg28_sw_sleep_config_t;
+
+/** GPIO1 output state (REG1B bits3:2, datasheet 6.13.2.17). */
+typedef enum {
+    TG28_SW_GPIO1_OUTPUT_HIZ = 0,
+    TG28_SW_GPIO1_OUTPUT_LOW = 1,
+} tg28_sw_gpio1_output_t;
+
+/**
+ * DCDC converter operating mode (REG80 bits6:5, REG81 bits7:2, datasheet
+ * 6.13.2.69-70). force_ccm keeps all DCDCs in continuous-conduction mode;
+ * dvm_ramp selects the DVM voltage-ramp speed; force_pwm per rail overrides
+ * the automatic PWM/PFM switching; spread_spectrum_enable and
+ * spread_range_khz gate the frequency-spreading feature.
+ */
+typedef struct {
+    bool force_ccm;
+    bool dvm_ramp_slow;
+    /** Force always-PWM per rail (index 0 = DCDC1 ... 3 = DCDC4); false
+     * keeps the automatic PWM/PFM switching. */
+    bool force_pwm[4];
+    bool spread_spectrum_enable;
+    /** false = 50 kHz spread range, true = 100 kHz. */
+    bool spread_range_100khz;
+} tg28_sw_dcdc_mode_t;
+
 /** I2C configuration used when creating a TG28 device. */
 typedef struct {
     uint8_t device_address;
@@ -219,17 +460,20 @@ esp_err_t tg28_sw_get_power_on_source(tg28_sw_handle_t handle, uint8_t *source);
 /**
  * Power off the board through the soft-PWROFF command (REG10 bit0, datasheet
  * 6.5.4.3 and 6.13.2.7). Once the write is acknowledged the PMU enters its
- * off state: every DCDC and LDO but the RTCLDO shuts down, 3V3_MAIN
- * collapses, and the call does not return in practice. Flush any pending log
- * output before calling. The device lock is released only when the register
- * write fails.
+ * off state: every DCDC and LDO but the RTCLDO shuts down, the main system
+ * rails collapse, and the call does not return in practice. Flush any
+ * pending log output before calling. The device lock is released only when
+ * the register write fails.
  */
 esp_err_t tg28_sw_power_off(tg28_sw_handle_t handle);
 
 /**
- * Read the latched power-off source (REG21 bit1, datasheet 6.13.2.19).
- * Writes 1 to *source when the last shutdown was a software power-off and
- * 0 otherwise.
+ * Read the latched power-off source bitmap from REG21 (datasheet
+ * 6.13.2.19). Each set bit reports one shutdown source via the
+ * TG28_SW_POWER_OFF_SOURCE_* macros; several sources may be latched at
+ * once. The latch survives only while the PMIC stays supplied, so after an
+ * unexpected power cut revive the PMIC (PWRON key, VBUS still attached)
+ * before reading.
  */
 esp_err_t tg28_sw_get_power_off_source(tg28_sw_handle_t handle, uint8_t *source);
 
@@ -314,11 +558,11 @@ esp_err_t tg28_sw_get_charge_current(tg28_sw_handle_t handle, uint16_t *milliamp
  * 6.13.2.60); anything else returns ESP_ERR_INVALID_ARG.
  */
 esp_err_t tg28_sw_set_precharge_current(tg28_sw_handle_t handle,
-        uint16_t milliamps);
+                                        uint16_t milliamps);
 
 /** Read the REG61 precharge current. */
 esp_err_t tg28_sw_get_precharge_current(tg28_sw_handle_t handle,
-        uint16_t *milliamps);
+                                        uint16_t *milliamps);
 
 /**
  * Set the REG16 input current limit. Only the discrete vendor levels
@@ -388,6 +632,10 @@ esp_err_t tg28_sw_get_low_battery_warning(tg28_sw_handle_t handle,
  * verification, set the update mark, reset the gauge MCU, and restore the
  * original charger-enable state. Call once per boot, or pass the model in the
  * create configuration to have the driver do so automatically.
+ *
+ * size must equal TG28_SW_BATTERY_MODEL_SIZE (128 bytes); any other size
+ * returns ESP_ERR_INVALID_SIZE. The model content is battery-specific and
+ * must come from the battery supplier.
  */
 esp_err_t tg28_sw_program_battery_model(tg28_sw_handle_t handle,
                                         const uint8_t *model, size_t size);
@@ -430,6 +678,236 @@ esp_err_t tg28_sw_switch_is_enabled(tg28_sw_handle_t handle,
 /** Read and clear the three interrupt status registers. */
 esp_err_t tg28_sw_get_and_clear_interrupts(tg28_sw_handle_t handle,
         uint8_t status[3]);
+
+/**
+ * Enable or disable the cell-battery charger (REG18 bit1, datasheet
+ * 6.13.2.14). Disabling stops charging while VBUS bookkeeping stays active;
+ * the fuel gauge and watchdog modules have their own enables.
+ */
+esp_err_t tg28_sw_set_charge_enable(tg28_sw_handle_t handle, bool enable);
+
+/** Read the REG18 bit1 charger-enable state. */
+esp_err_t tg28_sw_get_charge_enable(tg28_sw_handle_t handle, bool *enabled);
+
+/**
+ * Configure the PMIC watchdog (REG18 bit0 enable, REG19, datasheet
+ * 6.13.2.14-15). The period is 1-128 s; on expiry the chip raises
+ * TG28_SW_IRQ_WDEXP and optionally restarts the system per the action.
+ * Feeding is required once enabled: call tg28_sw_feed_watchdog() more
+ * often than the period.
+ */
+esp_err_t tg28_sw_set_watchdog(tg28_sw_handle_t handle,
+                               const tg28_sw_watchdog_config_t *config);
+
+/** Read the watchdog configuration. */
+esp_err_t tg28_sw_get_watchdog(tg28_sw_handle_t handle,
+                               tg28_sw_watchdog_config_t *config);
+
+/**
+ * Feed (clear) the watchdog by pulsing the REG19 bit3 clear signal
+ * (RWAC, datasheet 6.13.2.15). Restart the countdown; call periodically
+ * while the watchdog is enabled.
+ */
+esp_err_t tg28_sw_feed_watchdog(tg28_sw_handle_t handle);
+
+/**
+ * Enable or disable the fuel-gauge module (REG18 bit3, datasheet 6.13.2.14
+ * and 6.11). Disabling stops SOC updates (REGA4 reads stale data).
+ */
+esp_err_t tg28_sw_set_gauge_enable(tg28_sw_handle_t handle, bool enable);
+
+/** Read the REG18 bit3 fuel-gauge-enable state. */
+esp_err_t tg28_sw_get_gauge_enable(tg28_sw_handle_t handle, bool *enabled);
+
+/**
+ * Set the battery temperature-sense thresholds and hystereses
+ * (REG52-REG57, datasheet 6.13.2.48-53). All fields are TS pin voltages
+ * with fixed steps per tg28_sw_ts_thresholds_t; values that are not
+ * exactly representable return ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_ts_thresholds(tg28_sw_handle_t handle,
+                                    const tg28_sw_ts_thresholds_t *thresholds);
+
+/** Read the battery temperature-sense thresholds and hystereses. */
+esp_err_t tg28_sw_get_ts_thresholds(tg28_sw_handle_t handle,
+                                    tg28_sw_ts_thresholds_t *thresholds);
+
+/**
+ * Configure the JEITA standard (REG58-REG5B, datasheet 6.13.2.54-57):
+ * enable, cool/warm current halving, cool/warm CV adjustment, and the T2/T3
+ * TS-voltage boundaries. cool_mv must be a multiple of 16 mV and warm_mv a
+ * multiple of 8 mV; anything else returns ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_jeita(tg28_sw_handle_t handle,
+                            const tg28_sw_jeita_config_t *config);
+
+/** Read the JEITA standard configuration. */
+esp_err_t tg28_sw_get_jeita(tg28_sw_handle_t handle,
+                            tg28_sw_jeita_config_t *config);
+
+/**
+ * Set the external-fixed TS comparison voltage ts_cfg_data (REG5C/REG5D,
+ * datasheet 6.13.2.58-59), used together with TG28_SW_TS_MODE_EXTERNAL_FIXED
+ * when the battery has no NTC. The value is a 14-bit TS voltage code in
+ * 0.5 mV/LSB terms (same scale as the TS ADC channel), 0-16383; anything
+ * else returns ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_ts_fixed_threshold(tg28_sw_handle_t handle,
+        uint16_t raw_code);
+
+/** Read the external-fixed TS comparison voltage ts_cfg_data code. */
+esp_err_t tg28_sw_get_ts_fixed_threshold(tg28_sw_handle_t handle,
+        uint16_t *raw_code);
+
+/**
+ * Set the thermal-regulation threshold (REG65 bits1:0, datasheet 6.13.2.64
+ * and 6.7.4.3). When the die exceeds this temperature the charger reduces
+ * current until the die cools.
+ */
+esp_err_t tg28_sw_set_thermal_regulation(tg28_sw_handle_t handle,
+        tg28_sw_thermal_regulation_t threshold);
+
+/** Read the thermal-regulation threshold. */
+esp_err_t tg28_sw_get_thermal_regulation(tg28_sw_handle_t handle,
+        tg28_sw_thermal_regulation_t *threshold);
+
+/**
+ * Configure the charger safety timers (REG67, datasheet 6.13.2.65 and
+ * 6.7.4.1): pre-charge timer, CC/CV charge-cycle timer, their enables, and
+ * the DPM/thermal slow-down bit. An expiry raises TG28_SW_IRQ_CHGTE and
+ * drops the charger into battery safe mode.
+ */
+esp_err_t tg28_sw_set_charge_timers(tg28_sw_handle_t handle,
+                                    const tg28_sw_charge_timers_t *timers);
+
+/** Read the charger safety-timer configuration. */
+esp_err_t tg28_sw_get_charge_timers(tg28_sw_handle_t handle,
+                                    tg28_sw_charge_timers_t *timers);
+
+/**
+ * Enable or disable battery detection (REG68 bit0, datasheet 6.13.2.66 and
+ * 6.7.3.5). When disabled the PMU reports the battery as always present.
+ */
+esp_err_t tg28_sw_set_battery_detect_enable(tg28_sw_handle_t handle, bool enable);
+
+/** Read the battery-detection enable state. */
+esp_err_t tg28_sw_get_battery_detect_enable(tg28_sw_handle_t handle, bool *enabled);
+
+/**
+ * Configure the CHGLED charging-indication pin (REG69, datasheet 6.13.2.67
+ * and Table 6-6): type A/B display mode, manual drive mode, and the pin
+ * enable.
+ */
+esp_err_t tg28_sw_set_charge_led(tg28_sw_handle_t handle,
+                                 const tg28_sw_charge_led_config_t *config);
+
+/** Read the CHGLED configuration. */
+esp_err_t tg28_sw_get_charge_led(tg28_sw_handle_t handle,
+                                 tg28_sw_charge_led_config_t *config);
+
+/**
+ * Configure backup/button-battery charging (REG18 bit2 enable, REG6A
+ * termination voltage, datasheet 6.13.2.68 and 6.12.2). Charging runs in
+ * linear mode at 100 uA; termination_mv accepts 2600-3300 mV in 100 mV
+ * steps, anything else returns ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_backup_charge(tg28_sw_handle_t handle, bool enable,
+                                    uint16_t termination_mv);
+
+/** Read the backup-battery charge enable and termination voltage. */
+esp_err_t tg28_sw_get_backup_charge(tg28_sw_handle_t handle, bool *enabled,
+                                    uint16_t *termination_mv);
+
+/**
+ * Set the minimum system voltage (REG14 bits2:0, datasheet 6.13.2.10).
+ * Accepts 3200-3900 mV in 100 mV steps; anything else returns
+ * ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_min_sys_voltage(tg28_sw_handle_t handle, uint16_t millivolts);
+
+/** Read the minimum system voltage. */
+esp_err_t tg28_sw_get_min_sys_voltage(tg28_sw_handle_t handle, uint16_t *millivolts);
+
+/**
+ * Configure the power-off policy group (REG22/REG23/REG24/REG27, datasheet
+ * 6.13.2.20-22,25). WARNING: incorrect settings can make the board
+ * unbootable or trigger unexpected shutdowns; see
+ * tg28_sw_poweroff_config_t. irqlevel_ms accepts 1000/1500/2000/2500,
+ * offlevel_ms accepts 4000/6000/8000/10000, onlevel_ms accepts
+ * 128/512/1000/2000; anything else returns ESP_ERR_INVALID_ARG.
+ */
+esp_err_t tg28_sw_set_poweroff_config(tg28_sw_handle_t handle,
+                                      const tg28_sw_poweroff_config_t *config);
+
+/** Read the power-off policy group. */
+esp_err_t tg28_sw_get_poweroff_config(tg28_sw_handle_t handle,
+                                      tg28_sw_poweroff_config_t *config);
+
+/**
+ * Configure sleep and wakeup behavior (REG26, datasheet 6.13.2.24 and
+ * 6.5.4.4). The wakeup/sleep enable bits are RWLC command bits: setting
+ * wakeup_enable starts a wakeup transition and setting sleep_enable starts
+ * a sleep transition; both self-report through the getter.
+ */
+esp_err_t tg28_sw_set_sleep_config(tg28_sw_handle_t handle,
+                                   const tg28_sw_sleep_config_t *config);
+
+/** Read the sleep/wakeup configuration. */
+esp_err_t tg28_sw_get_sleep_config(tg28_sw_handle_t handle,
+                                   tg28_sw_sleep_config_t *config);
+
+/**
+ * Drive the GPIO1 open-drain output (REG1B bits3:2, datasheet 6.13.2.17).
+ * Only high-impedance and driven-low are defined; the other two codes are
+ * reserved. GPIO1 may be OTP-strapped as the RTCLDO2 output on some parts;
+ * use it as a GPIO only when the board design confirms the strap.
+ */
+esp_err_t tg28_sw_set_gpio1_config(tg28_sw_handle_t handle,
+                                   tg28_sw_gpio1_output_t output);
+
+/** Read the GPIO1 output state. */
+esp_err_t tg28_sw_get_gpio1_config(tg28_sw_handle_t handle,
+                                   tg28_sw_gpio1_output_t *output);
+
+/**
+ * Configure DCDC operating modes (REG80 bits6:5 force-CCM/DVM ramp, REG81
+ * force-PWM per rail and spread spectrum, datasheet 6.13.2.69-70). Only the
+ * four DCDC rails of the switch-charger variant are addressable.
+ */
+esp_err_t tg28_sw_set_dcdc_mode(tg28_sw_handle_t handle,
+                                const tg28_sw_dcdc_mode_t *mode);
+
+/** Read the DCDC operating-mode configuration. */
+esp_err_t tg28_sw_get_dcdc_mode(tg28_sw_handle_t handle,
+                                tg28_sw_dcdc_mode_t *mode);
+
+/**
+ * Software-reset the whole PMIC (REG10 bit1, RWAC, datasheet 6.13.2.7 and
+ * 6.5.4.5). WARNING: this restarts the entire PMU; all rails cycle and
+ * system registers reset to defaults. The call does not return in practice
+ * on success and the device lock is released only on failure.
+ */
+esp_err_t tg28_sw_soft_reset(tg28_sw_handle_t handle);
+
+/**
+ * Keep the BATFET enabled while the PMU is powered off and only the battery
+ * supplies it (REG12 bit3, datasheet 6.13.2.8). Clearing it gives the
+ * lowest ship-mode current (<40 uA); enabling keeps the battery connected
+ * to SYS in the off state. The POR value is EFUSE-defined per part.
+ */
+esp_err_t tg28_sw_set_batfet_off_state_enable(tg28_sw_handle_t handle, bool enable);
+
+/** Read the REG12 bit3 BATFET off-state enable. */
+esp_err_t tg28_sw_get_batfet_off_state_enable(tg28_sw_handle_t handle, bool *enabled);
+
+/**
+ * Write one raw register byte (diagnostic escape hatch paired with
+ * tg28_sw_read_registers). WARNING: prefer the typed APIs; writing the
+ * wrong register can affect charging safety, rail sequencing, or reset the
+ * PMU. No field decoding or side-effect protection is applied.
+ */
+esp_err_t tg28_sw_write_register(tg28_sw_handle_t handle, uint8_t register_address,
+                                 uint8_t value);
 
 /** Return a stable lowercase regulator name. */
 const char *tg28_sw_regulator_name(tg28_sw_regulator_t regulator);

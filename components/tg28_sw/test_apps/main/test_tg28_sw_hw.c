@@ -35,9 +35,9 @@
 #if defined(CONFIG_TG28_SW_TEST_WITH_HARDWARE)
 
 #define TEST_I2C_PORT   I2C_NUM_0
-#define TEST_I2C_SCL    GPIO_NUM_33
-#define TEST_I2C_SDA    GPIO_NUM_34
-#define TEST_PMIC_IRQ   GPIO_NUM_2
+#define TEST_I2C_SCL    CONFIG_TG28_SW_TEST_I2C_SCL
+#define TEST_I2C_SDA    CONFIG_TG28_SW_TEST_I2C_SDA
+#define TEST_PMIC_IRQ   CONFIG_TG28_SW_TEST_PMIC_IRQ
 
 static const char *TAG = "tg28_sw_hw";
 
@@ -56,13 +56,14 @@ static void test_setup(void)
     };
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &s_bus));
 
-    const tg28_sw_config_t config = TG28_SW_CONFIG_DEFAULT();
+    tg28_sw_config_t config = TG28_SW_CONFIG_DEFAULT();
+    config.device_address = CONFIG_TG28_SW_TEST_I2C_ADDRESS;
     ESP_ERROR_CHECK(tg28_sw_create(s_bus, &config, &s_pmic));
 
     const gpio_config_t irq_config = {
         .pin_bit_mask = 1ULL << TEST_PMIC_IRQ,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+                             .mode = GPIO_MODE_INPUT,
+                             .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&irq_config));
 }
@@ -72,6 +73,10 @@ static void test_setup(void)
  * code 2), DLDO1/DLDO2 off, DCDC1/DCDC4 auto-started. */
 static void test_h1_otp_baseline(void)
 {
+#if !CONFIG_TG28_SW_TEST_OTP_BASELINE
+    ESP_LOGI(TAG, "H1: OTP baseline assertions skipped (non-Candis OTP)");
+    return;
+#endif
     ESP_LOGI(TAG, "H1: OTP baseline read-back");
     uint16_t value = 0;
     bool enabled = false;
@@ -90,18 +95,18 @@ static void test_h1_otp_baseline(void)
     assert(value == 4200);
 
     ESP_ERROR_CHECK(tg28_sw_regulator_is_enabled(s_pmic, TG28_SW_DLDO1,
-                                                 &enabled));
+                    &enabled));
     ESP_LOGI(TAG, "H1: DLDO1 enabled = %d (expect 0)", enabled);
     assert(!enabled);
     ESP_ERROR_CHECK(tg28_sw_regulator_is_enabled(s_pmic, TG28_SW_DLDO2,
-                                                 &enabled));
+                    &enabled));
     assert(!enabled);
     ESP_ERROR_CHECK(tg28_sw_regulator_is_enabled(s_pmic, TG28_SW_DCDC1,
-                                                 &enabled));
+                    &enabled));
     ESP_LOGI(TAG, "H1: DCDC1 enabled = %d (expect 1)", enabled);
     assert(enabled);
     ESP_ERROR_CHECK(tg28_sw_regulator_is_enabled(s_pmic, TG28_SW_DCDC4,
-                                                 &enabled));
+                    &enabled));
     assert(enabled);
 }
 
@@ -114,7 +119,7 @@ static void test_h2_dc1sw_powers_rgb(void)
     ESP_LOGI(TAG, "H2: enabling DC1SW; measure WS2812B_PWR ~= 3.3V now");
     ESP_ERROR_CHECK(tg28_sw_switch_enable(s_pmic, TG28_SW_SWITCH_DC1SW, true));
     ESP_ERROR_CHECK(tg28_sw_switch_is_enabled(s_pmic, TG28_SW_SWITCH_DC1SW,
-                                              &enabled));
+                    &enabled));
     assert(enabled);
     vTaskDelay(pdMS_TO_TICKS(5000));   /* operator measurement window */
 
@@ -122,7 +127,7 @@ static void test_h2_dc1sw_powers_rgb(void)
              "must go dark");
     ESP_ERROR_CHECK(tg28_sw_switch_enable(s_pmic, TG28_SW_SWITCH_DC1SW, false));
     ESP_ERROR_CHECK(tg28_sw_switch_is_enabled(s_pmic, TG28_SW_SWITCH_DC1SW,
-                                              &enabled));
+                    &enabled));
     assert(!enabled);
     vTaskDelay(pdMS_TO_TICKS(2000));   /* operator measurement window */
 
@@ -188,9 +193,9 @@ static void test_h5_irq_events(void)
                     TG28_SW_POWER_KEY_IRQ_SHORT_PRESS |
                     TG28_SW_POWER_KEY_IRQ_LONG_PRESS));
     ESP_ERROR_CHECK(tg28_sw_set_irq_enable_bit(s_pmic, TG28_SW_IRQ_VINSERT,
-                                               true));
+                    true));
     ESP_ERROR_CHECK(tg28_sw_set_irq_enable_bit(s_pmic, TG28_SW_IRQ_VREMOVE,
-                                               true));
+                    true));
 
     uint8_t seen[3] = {0};
     uint8_t status[3] = {0};
@@ -223,12 +228,12 @@ static void test_h6_irq_enable_bit_isolated(void)
 
     ESP_ERROR_CHECK(tg28_sw_get_irq_enable(s_pmic, TG28_SW_IRQ_BANK1, &before));
     ESP_ERROR_CHECK(tg28_sw_set_irq_enable_bit(s_pmic, TG28_SW_IRQ_VINSERT,
-                                               true));
+                    true));
     ESP_ERROR_CHECK(tg28_sw_get_irq_enable(s_pmic, TG28_SW_IRQ_BANK1, &after));
     assert((after & bit) != 0);
     assert((after & (uint8_t)~bit) == (before & (uint8_t)~bit));
     ESP_ERROR_CHECK(tg28_sw_get_irq_enable_bit(s_pmic, TG28_SW_IRQ_VINSERT,
-                                               &enabled));
+                    &enabled));
     assert(enabled);
 }
 
@@ -244,15 +249,15 @@ static void test_h7_adc_channels(void)
     for (size_t i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i) {
         bool was_enabled = false;
         ESP_ERROR_CHECK(tg28_sw_get_adc_channel_enable(s_pmic, channels[i],
-                                                       &was_enabled));
+                        &was_enabled));
         ESP_ERROR_CHECK(tg28_sw_set_adc_channel_enable(s_pmic, channels[i],
-                                                       true));
+                        true));
         vTaskDelay(pdMS_TO_TICKS(50));   /* channel settling time */
         uint16_t mv = 0;
         ESP_ERROR_CHECK(tg28_sw_read_adc_channel(s_pmic, channels[i], &mv));
         ESP_LOGI(TAG, "H7: ADC channel %d = %u mV", (int)channels[i], mv);
         ESP_ERROR_CHECK(tg28_sw_set_adc_channel_enable(s_pmic, channels[i],
-                                                       was_enabled));
+                        was_enabled));
     }
 }
 

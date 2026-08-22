@@ -18,13 +18,22 @@
 #define TG28_SW_REG_COMMON_STATUS0       0x00
 #define TG28_SW_REG_CHIP_ID              0x03
 #define TG28_SW_REG_COMMON_CONFIG        0x10
+#define TG28_SW_REG_BATFET_CONTROL       0x12
+#define TG28_SW_REG_MIN_SYS_VOLTAGE      0x14
 #define TG28_SW_REG_VINDPM               0x15
 #define TG28_SW_REG_INPUT_CURRENT_LIMIT  0x16
 #define TG28_SW_REG_MODE                 0x17
 #define TG28_SW_REG_MODULE_ENABLE        0x18
+#define TG28_SW_REG_WATCHDOG             0x19
 #define TG28_SW_REG_LOW_BATTERY_WARNING  0x1A
+#define TG28_SW_REG_GPIO1_CONFIG         0x1B
 #define TG28_SW_REG_POWER_ON_SOURCE      0x20
 #define TG28_SW_REG_POWER_OFF_SOURCE     0x21
+#define TG28_SW_REG_PWROFF_EN            0x22
+#define TG28_SW_REG_DCDC_PWROFF_EN       0x23
+#define TG28_SW_REG_VOFF_THRESHOLD       0x24
+#define TG28_SW_REG_SLEEP_WAKEUP         0x26
+#define TG28_SW_REG_POWER_KEY_LEVELS     0x27
 #define TG28_SW_REG_ADC_CHANNEL_ENABLE   0x30
 #define TG28_SW_REG_VBAT_H               0x34
 #define TG28_SW_REG_TS_H                 0x36
@@ -36,11 +45,29 @@
 #define TG28_SW_REG_INT_ENABLE2          0x42
 #define TG28_SW_REG_INT_STATUS0          0x48
 #define TG28_SW_REG_TS_CONFIG            0x50
+#define TG28_SW_REG_TS_HYST_LOW          0x52
+#define TG28_SW_REG_TS_HYST_HIGH         0x53
+#define TG28_SW_REG_VLTF_CHARGE          0x54
+#define TG28_SW_REG_VHTF_CHARGE          0x55
+#define TG28_SW_REG_VLTF_WORK            0x56
+#define TG28_SW_REG_VHTF_WORK            0x57
+#define TG28_SW_REG_JEITA_ENABLE         0x58
+#define TG28_SW_REG_JEITA_CV             0x59
+#define TG28_SW_REG_JEITA_COOL           0x5A
+#define TG28_SW_REG_JEITA_WARM           0x5B
+#define TG28_SW_REG_TS_FIXED_H           0x5C
+#define TG28_SW_REG_TS_FIXED_L           0x5D
 #define TG28_SW_REG_PRECHARGE_CURRENT    0x61
 #define TG28_SW_REG_CHARGE_CURRENT       0x62
 #define TG28_SW_REG_TERMINATION_CURRENT  0x63
 #define TG28_SW_REG_CHARGE_VOLTAGE       0x64
+#define TG28_SW_REG_THERMAL_REGULATION   0x65
+#define TG28_SW_REG_CHARGE_TIMERS        0x67
+#define TG28_SW_REG_BATTERY_DETECT       0x68
+#define TG28_SW_REG_CHARGE_LED           0x69
+#define TG28_SW_REG_BACKUP_CHARGE        0x6A
 #define TG28_SW_REG_DCDC_ENABLE          0x80
+#define TG28_SW_REG_DCDC_FORCE_PWM       0x81
 #define TG28_SW_REG_DCDC1_VOLTAGE        0x82
 #define TG28_SW_REG_DCDC2_VOLTAGE        0x83
 #define TG28_SW_REG_DCDC3_VOLTAGE        0x84
@@ -70,9 +97,6 @@
  * self-clearing command bits (datasheet 6.13.2.7). */
 #define TG28_SW_SOFT_PWROFF_MASK         (1U << 0)
 #define TG28_SW_SOFTWARE_RESET_MASK      (1U << 1)
-/* REG21 bit1 latches a software power-off as the power-off source
- * (datasheet 6.13.2.19). */
-#define TG28_SW_POWER_OFF_SOURCE_MASK    (1U << 1)
 #define TG28_SW_POWER_KEY_IRQ_MASK       0x0F
 #define TG28_SW_TS_MODE_MASK             (1U << 4)
 #define TG28_SW_TS_CURRENT_SOURCE_MASK   (3U << 2)
@@ -89,6 +113,71 @@
 #define TG28_SW_VINDPM_MASK              0x0F
 #define TG28_SW_BROM_UPDATE_MARK_MASK    (1U << 4)
 #define TG28_SW_BROM_WRITER_ENABLE_MASK  (1U << 0)
+/* REG18 module enables (datasheet 6.13.2.14). */
+#define TG28_SW_GAUGE_ENABLE_MASK        (1U << 3)
+#define TG28_SW_BACKUP_CHARGE_ENABLE_MASK (1U << 2)
+#define TG28_SW_CHARGE_ENABLE_MASK       (1U << 1)
+#define TG28_SW_WATCHDOG_ENABLE_MASK     (1U << 0)
+/* REG19 watchdog control (datasheet 6.13.2.15). */
+#define TG28_SW_WATCHDOG_ACTION_MASK     0x30
+#define TG28_SW_WATCHDOG_CLEAR_MASK      (1U << 3)
+#define TG28_SW_WATCHDOG_PERIOD_MASK     0x07
+/* REG12 BATFET off-state keep (datasheet 6.13.2.8). */
+#define TG28_SW_BATFET_OFF_ENABLE_MASK   (1U << 3)
+/* REG14 minimum system voltage codes 0-7 = 3.2-3.9V (6.13.2.10). */
+#define TG28_SW_MIN_SYS_VOLTAGE_MASK     0x07
+#define TG28_SW_MIN_SYS_VOLTAGE_BASE_MV  3200
+#define TG28_SW_MIN_SYS_VOLTAGE_STEP_MV  100
+/* REG22 PWROFF_EN bits (datasheet 6.13.2.20). */
+#define TG28_SW_PWROFF_DIE_OT2_MASK      (1U << 2)
+#define TG28_SW_PWROFF_OFFLEVEL_MASK     (1U << 1)
+#define TG28_SW_PWROFF_BUTTON_RESTART_MASK (1U << 0)
+/* REG23 DCDC OVP/UVP power-off enables (datasheet 6.13.2.21). */
+#define TG28_SW_DCDC_OVP_PWROFF_MASK     (1U << 5)
+#define TG28_SW_DCDC_UVP_PWROFF_MASK     0x0F
+/* REG24 battery voltage for PWROFF: 2.6-3.3V in 100mV steps (6.13.2.22). */
+#define TG28_SW_VOFF_VOLTAGE_MASK        0x07
+#define TG28_SW_VOFF_VOLTAGE_BASE_MV     2600
+#define TG28_SW_VOFF_VOLTAGE_STEP_MV     100
+/* REG26 sleep/wakeup control bits (datasheet 6.13.2.24). */
+#define TG28_SW_WAKEUP_IRQ_MASK          (1U << 4)
+#define TG28_SW_WAKEUP_PWROK_LOW_MASK    (1U << 3)
+#define TG28_SW_WAKEUP_VOLTAGE_MASK      (1U << 2)
+#define TG28_SW_WAKEUP_ENABLE_MASK       (1U << 1)
+#define TG28_SW_SLEEP_ENABLE_MASK        (1U << 0)
+/* REG27 IRQLEVEL/OFFLEVEL/ONLEVEL fields (datasheet 6.13.2.25). */
+#define TG28_SW_IRQLEVEL_MASK            0x30
+#define TG28_SW_OFFLEVEL_MASK            0x0C
+#define TG28_SW_ONLEVEL_MASK             0x03
+/* REG1B GPIO1 output field in bits 3:2 (datasheet 6.13.2.17). */
+#define TG28_SW_GPIO1_OUTPUT_MASK        0x0C
+/* REG65 thermal regulation threshold codes (6.13.2.64). */
+#define TG28_SW_THERMAL_REGULATION_MASK  0x03
+/* REG67 charger safety-timer fields (6.13.2.65). */
+#define TG28_SW_TIMER_SLOW_DPM_MASK      (1U << 7)
+#define TG28_SW_CHARGE_TIMER_ENABLE_MASK (1U << 6)
+#define TG28_SW_CHARGE_TIMER_MASK        0x30
+#define TG28_SW_PRECHARGE_TIMER_ENABLE_MASK (1U << 2)
+#define TG28_SW_PRECHARGE_TIMER_MASK     0x03
+/* REG68 battery detection enable (6.13.2.66). */
+#define TG28_SW_BATTERY_DETECT_MASK      (1U << 0)
+/* REG69 CHGLED fields (6.13.2.67). */
+#define TG28_SW_CHARGE_LED_MANUAL_MASK   0x30
+#define TG28_SW_CHARGE_LED_MODE_MASK     0x06
+#define TG28_SW_CHARGE_LED_ENABLE_MASK   (1U << 0)
+/* REG6A backup termination voltage codes 0-7 = 2.6-3.3V (6.13.2.68), the
+ * same 2600mV base and 100mV step as REG24. */
+#define TG28_SW_BACKUP_VOLTAGE_MASK      0x07
+/* REG80 force-CCM and DVM ramp bits (6.13.2.69). */
+#define TG28_SW_DCDC_FORCE_CCM_MASK      (1U << 6)
+#define TG28_SW_DCDC_DVM_RAMP_MASK       (1U << 5)
+/* REG81 force-PWM bits for DCDC4..DCDC1 in bits 5:2 and spread-spectrum
+ * bits 7:6 (6.13.2.70). */
+#define TG28_SW_DCDC_SPREAD_ENABLE_MASK  (1U << 7)
+#define TG28_SW_DCDC_SPREAD_RANGE_MASK   (1U << 6)
+#define TG28_SW_DCDC_FORCE_PWM_MASK      0x3C
+/* REG5C ts_cfg_data high field (6.13.2.58): bits 5:0 hold code bits 13:8. */
+#define TG28_SW_TS_FIXED_H_MASK          0x3F
 /* IRQ slot 21 (REG42 bit5) is a reserved read-only bit on the switch-charger
  * variant and deliberately has no tg28_sw_irq_t symbol. */
 #define TG28_SW_IRQ_RESERVED_SLOT        21
@@ -151,6 +240,10 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
     [TG28_SW_BLDO2] = {"bldo2", TG28_SW_REG_BLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 5, 0x1F, 500, 3500, 100, 0, 0
     },
+    /* REG98 (6.13.2.83) is self-contradictory: the headline allows
+     * 0.5-1.4V in 50mV steps while the last enumeration entry maps code 19
+     * to 1.40V; the step interpretation wins (code 18 = 1400mV), matching
+     * the vendor driver behavior. */
     [TG28_SW_CPUSLDO] = {"cpusldo", TG28_SW_REG_CPUSLDO_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 6, 0x1F, 500, 1400, 50, 0, 0
     },
@@ -159,11 +252,13 @@ static const regulator_config_t s_regulators[TG28_SW_REGULATOR_COUNT] = {
      * headline allows 0.5-3.4V while its own enumeration stops at 3.3V
      * (code 28) and marks codes 29-31 reserved; the enumeration wins, so the
      * maximum here is 3300mV. On boards whose OTP straps DLDO1/DLDO2 as
-     * load switches (for example the RGB supply on Candis-S31), the voltage
-     * register is inert and tg28_sw_switch_enable() controls the rail. */
+     * load switches, the voltage register is inert and
+     * tg28_sw_switch_enable() controls the rail. */
     [TG28_SW_DLDO1] = {"dldo1", TG28_SW_REG_DLDO1_VOLTAGE, TG28_SW_REG_LDO_ENABLE0,
         1U << 7, 0x1F, 500, 3300, 100, 0, 0
     },
+    /* REG9A (6.13.2.85) carries the same enumeration/step contradiction as
+     * REG98; the step interpretation wins here too. */
     [TG28_SW_DLDO2] = {"dldo2", TG28_SW_REG_DLDO2_VOLTAGE, TG28_SW_REG_LDO_ENABLE1,
         1U << 0, 0x1F, 500, 1400, 50, 0, 0
     },
@@ -567,8 +662,8 @@ esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
                         ((device_config->battery_model == NULL &&
                           device_config->battery_model_size == 0) ||
                          (device_config->battery_model != NULL &&
-                          device_config->battery_model_size > 0)),
-                        ESP_ERR_INVALID_ARG, TAG, "invalid I2C configuration");
+                          device_config->battery_model_size == TG28_SW_BATTERY_MODEL_SIZE)),
+                        ESP_ERR_INVALID_ARG, TAG, "invalid device configuration");
 
     tg28_sw_handle_t handle = calloc(1, sizeof(*handle));
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_NO_MEM, TAG, "allocation failed");
@@ -604,7 +699,7 @@ esp_err_t tg28_sw_create(i2c_master_bus_handle_t bus,
 
     if (device_config->battery_model != NULL && device_config->battery_model_size > 0) {
         error = tg28_sw_program_battery_model(handle, device_config->battery_model,
-                                               device_config->battery_model_size);
+                                              device_config->battery_model_size);
         if (error != ESP_OK) {
             i2c_master_bus_rm_device(handle->i2c_device);
             vSemaphoreDelete(handle->lock);
@@ -745,7 +840,10 @@ esp_err_t tg28_sw_get_power_off_source(tg28_sw_handle_t handle, uint8_t *source)
     const esp_err_t error = read_registers(handle, TG28_SW_REG_POWER_OFF_SOURCE,
                                            &value, sizeof(value));
     if (error == ESP_OK) {
-        *source = (value & TG28_SW_POWER_OFF_SOURCE_MASK) != 0;
+        /* Return the raw REG21 byte: all eight latched power-off sources
+         * (datasheet 6.13.2.19) matter for forensics; the TG28_SW_POWER_OFF_SOURCE_*
+         * bit definitions name them. */
+        *source = value;
     }
     unlock_device(handle);
     return error;
@@ -997,8 +1095,13 @@ esp_err_t tg28_sw_get_vindpm(tg28_sw_handle_t handle, uint16_t *millivolts)
 esp_err_t tg28_sw_program_battery_model(tg28_sw_handle_t handle,
                                         const uint8_t *model, size_t size)
 {
-    ESP_RETURN_ON_FALSE(model != NULL && size > 0, ESP_ERR_INVALID_ARG,
-                        TAG, "battery model is empty");
+    ESP_RETURN_ON_FALSE(model != NULL, ESP_ERR_INVALID_ARG,
+                        TAG, "battery model is NULL");
+    /* The gauge BROM window takes exactly TG28_SW_BATTERY_MODEL_SIZE bytes
+     * (hardware design guide 6.2): fewer leaves a partial model and more is
+     * undefined behavior. */
+    ESP_RETURN_ON_FALSE(size == TG28_SW_BATTERY_MODEL_SIZE, ESP_ERR_INVALID_SIZE,
+                        TAG, "battery model must be exactly %u bytes", TG28_SW_BATTERY_MODEL_SIZE);
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
 
     uint8_t module_enable = 0;
@@ -1339,6 +1442,777 @@ esp_err_t tg28_sw_get_low_battery_warning(tg28_sw_handle_t handle,
         tg28_sw_decode_low_battery_warning(value, level1_percent,
                                            level2_percent);
     }
+    unlock_device(handle);
+    return error;
+}
+
+/* ------------------------------------------------------------------------
+ * Feature-block APIs: every setter/getter below holds the device lock and
+ * uses read-modify-write so unrelated bits (including reserved POR-1 bits)
+ * are preserved. Datasheet section numbers are cited per function.
+ * --------------------------------------------------------------------- */
+
+/* The caller must already hold the device lock. */
+static esp_err_t get_reg_bit_locked(tg28_sw_handle_t handle, uint8_t reg,
+                                    uint8_t mask, bool *enabled)
+{
+    uint8_t value = 0;
+    ESP_RETURN_ON_ERROR(read_registers(handle, reg, &value, sizeof(value)),
+                        TAG, "register read failed");
+    *enabled = (value & mask) != 0;
+    return ESP_OK;
+}
+
+/* Encode helpers: exact-step validation, ESP_ERR_INVALID_ARG when the value
+ * is not representable. */
+static esp_err_t encode_step_mv(uint16_t millivolts, uint16_t base_mv,
+                                uint16_t step_mv, uint8_t max_code, uint8_t *code)
+{
+    if (millivolts < base_mv) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t delta = millivolts - base_mv;
+    if (delta % step_mv != 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t encoded = delta / step_mv;
+    if (encoded > max_code) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *code = (uint8_t)encoded;
+    return ESP_OK;
+}
+
+esp_err_t tg28_sw_set_charge_enable(tg28_sw_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_MODULE_ENABLE,
+                                        TG28_SW_CHARGE_ENABLE_MASK,
+                                        enable ? TG28_SW_CHARGE_ENABLE_MASK : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_charge_enable(tg28_sw_handle_t handle, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && enabled != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_reg_bit_locked(handle, TG28_SW_REG_MODULE_ENABLE,
+                            TG28_SW_CHARGE_ENABLE_MASK, enabled);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_watchdog(tg28_sw_handle_t handle,
+                               const tg28_sw_watchdog_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(config->period >= TG28_SW_WATCHDOG_PERIOD_1S &&
+                        config->period <= TG28_SW_WATCHDOG_PERIOD_128S &&
+                        config->action >= TG28_SW_WATCHDOG_ACTION_IRQ_ONLY &&
+                        config->action <= TG28_SW_WATCHDOG_ACTION_IRQ_RESET_PWRCYCLE,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid watchdog configuration");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    /* REG19 bits5:4 action, bits2:0 period (datasheet 6.13.2.15). */
+    esp_err_t error = update_bits(handle, TG28_SW_REG_WATCHDOG,
+                                  TG28_SW_WATCHDOG_ACTION_MASK | TG28_SW_WATCHDOG_PERIOD_MASK,
+                                  ((uint8_t)config->action << 4) | (uint8_t)config->period);
+    if (error == ESP_OK) {
+        /* REG18 bit0 watchdog module enable (datasheet 6.13.2.14). */
+        error = update_bits(handle, TG28_SW_REG_MODULE_ENABLE,
+                            TG28_SW_WATCHDOG_ENABLE_MASK,
+                            config->enable ? TG28_SW_WATCHDOG_ENABLE_MASK : 0);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_watchdog(tg28_sw_handle_t handle,
+                               tg28_sw_watchdog_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t control = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_WATCHDOG, &control, sizeof(control));
+    if (error == ESP_OK) {
+        config->action = (tg28_sw_watchdog_action_t)((control & TG28_SW_WATCHDOG_ACTION_MASK) >> 4);
+        config->period = (tg28_sw_watchdog_period_t)(control & TG28_SW_WATCHDOG_PERIOD_MASK);
+        error = get_reg_bit_locked(handle, TG28_SW_REG_MODULE_ENABLE,
+                                   TG28_SW_WATCHDOG_ENABLE_MASK, &config->enable);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_feed_watchdog(tg28_sw_handle_t handle)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    /* REG19 bit3 is the RWAC clear signal (datasheet 6.13.2.15). */
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_WATCHDOG,
+                                        TG28_SW_WATCHDOG_CLEAR_MASK,
+                                        TG28_SW_WATCHDOG_CLEAR_MASK);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_gauge_enable(tg28_sw_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_MODULE_ENABLE,
+                                        TG28_SW_GAUGE_ENABLE_MASK,
+                                        enable ? TG28_SW_GAUGE_ENABLE_MASK : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_gauge_enable(tg28_sw_handle_t handle, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && enabled != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_reg_bit_locked(handle, TG28_SW_REG_MODULE_ENABLE,
+                            TG28_SW_GAUGE_ENABLE_MASK, enabled);
+    unlock_device(handle);
+    return error;
+}
+
+/* TS thresholds (datasheet 6.13.2.48-53): REG52 hyst L2N 16mV/step,
+ * REG53 hyst H2L 4mV/step, REG54/56 VLTF 32mV/step, REG55/57 VHTF 2mV/step. */
+esp_err_t tg28_sw_set_ts_thresholds(tg28_sw_handle_t handle,
+                                    const tg28_sw_ts_thresholds_t *thresholds)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && thresholds != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    uint8_t hyst_low = 0, hyst_high = 0, vltf_chg = 0, vhtf_chg = 0, vltf_work = 0, vhtf_work = 0;
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->hyst_low_to_normal_mv, 0, 16, 0xFF, &hyst_low),
+                        TAG, "invalid low-temperature hysteresis");
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->hyst_high_to_normal_mv, 0, 4, 0xFF, &hyst_high),
+                        TAG, "invalid high-temperature hysteresis");
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->vltf_charge_mv, 0, 32, 0xFF, &vltf_chg),
+                        TAG, "invalid VLTF charge threshold");
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->vhtf_charge_mv, 0, 2, 0xFF, &vhtf_chg),
+                        TAG, "invalid VHTF charge threshold");
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->vltf_work_mv, 0, 32, 0xFF, &vltf_work),
+                        TAG, "invalid VLTF work threshold");
+    ESP_RETURN_ON_ERROR(encode_step_mv(thresholds->vhtf_work_mv, 0, 2, 0xFF, &vhtf_work),
+                        TAG, "invalid VHTF work threshold");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const uint8_t images[6] = {hyst_low, hyst_high, vltf_chg, vhtf_chg, vltf_work, vhtf_work};
+    esp_err_t error = ESP_OK;
+    for (int i = 0; i < 6 && error == ESP_OK; i++) {
+        error = write_registers(handle, TG28_SW_REG_TS_HYST_LOW + i, &images[i], 1);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_ts_thresholds(tg28_sw_handle_t handle,
+                                    tg28_sw_ts_thresholds_t *thresholds)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && thresholds != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t images[6] = {0};
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_TS_HYST_LOW, images, sizeof(images));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "TS threshold read failed");
+    thresholds->hyst_low_to_normal_mv = (uint16_t)images[0] * 16;
+    thresholds->hyst_high_to_normal_mv = (uint16_t)images[1] * 4;
+    thresholds->vltf_charge_mv = (uint16_t)images[2] * 32;
+    thresholds->vhtf_charge_mv = (uint16_t)images[3] * 2;
+    thresholds->vltf_work_mv = (uint16_t)images[4] * 32;
+    thresholds->vhtf_work_mv = (uint16_t)images[5] * 2;
+    return ESP_OK;
+}
+
+/* JEITA (datasheet 6.13.2.54-57): REG58 bit0 enable; REG59 bit6 warm current
+ * half, bit4 cool current half, bits3:2 warm CV gears, bits1:0 cool CV gears;
+ * REG5A cool(T2) 16mV/step; REG5B warm(T3) 8mV/step. */
+esp_err_t tg28_sw_set_jeita(tg28_sw_handle_t handle,
+                            const tg28_sw_jeita_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(config->cool_cv_adjust >= TG28_SW_JEITA_CV_ADJUST_NONE &&
+                        config->cool_cv_adjust <= TG28_SW_JEITA_CV_ADJUST_TWO_GEARS &&
+                        config->warm_cv_adjust >= TG28_SW_JEITA_CV_ADJUST_NONE &&
+                        config->warm_cv_adjust <= TG28_SW_JEITA_CV_ADJUST_TWO_GEARS,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid CV adjustment");
+    uint8_t cool = 0, warm = 0;
+    ESP_RETURN_ON_ERROR(encode_step_mv(config->cool_mv, 0, 16, 0xFF, &cool),
+                        TAG, "invalid cool boundary");
+    ESP_RETURN_ON_ERROR(encode_step_mv(config->warm_mv, 0, 8, 0xFF, &warm),
+                        TAG, "invalid warm boundary");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = write_registers(handle, TG28_SW_REG_JEITA_COOL, &cool, 1);
+    if (error == ESP_OK) {
+        error = write_registers(handle, TG28_SW_REG_JEITA_WARM, &warm, 1);
+    }
+    if (error == ESP_OK) {
+        const uint8_t cv_image = (config->warm_current_half ? (1U << 6) : 0) |
+                                 (config->cool_current_half ? (1U << 4) : 0) |
+                                 ((uint8_t)config->warm_cv_adjust << 2) |
+                                 (uint8_t)config->cool_cv_adjust;
+        error = write_registers(handle, TG28_SW_REG_JEITA_CV, &cv_image, 1);
+    }
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_JEITA_ENABLE, 0x01,
+                            config->enable ? 0x01 : 0);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_jeita(tg28_sw_handle_t handle,
+                            tg28_sw_jeita_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t cool = 0, warm = 0, cv = 0, enable_reg = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_JEITA_COOL, &cool, 1);
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_JEITA_WARM, &warm, 1);
+    }
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_JEITA_CV, &cv, 1);
+    }
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_JEITA_ENABLE, &enable_reg, 1);
+    }
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "JEITA register read failed");
+    config->cool_mv = (uint16_t)cool * 16;
+    config->warm_mv = (uint16_t)warm * 8;
+    config->warm_current_half = (cv & (1U << 6)) != 0;
+    config->cool_current_half = (cv & (1U << 4)) != 0;
+    config->warm_cv_adjust = (tg28_sw_jeita_cv_adjust_t)((cv >> 2) & 0x03);
+    config->cool_cv_adjust = (tg28_sw_jeita_cv_adjust_t)(cv & 0x03);
+    config->enable = (enable_reg & 0x01) != 0;
+    /* A reserved CV code (11b) reads back as two gears, the strongest
+     * defined adjustment; the setter never produces it. */
+    if (config->warm_cv_adjust > TG28_SW_JEITA_CV_ADJUST_TWO_GEARS) {
+        config->warm_cv_adjust = TG28_SW_JEITA_CV_ADJUST_TWO_GEARS;
+    }
+    if (config->cool_cv_adjust > TG28_SW_JEITA_CV_ADJUST_TWO_GEARS) {
+        config->cool_cv_adjust = TG28_SW_JEITA_CV_ADJUST_TWO_GEARS;
+    }
+    return ESP_OK;
+}
+
+/* ts_cfg_data (datasheet 6.13.2.58-59): 14-bit TS voltage code, 0.5 mV/LSB
+ * like the TS ADC channel. REG5C bits5:0 hold code bits 13:8; REG5D holds
+ * bits 7:0. The per-register table marks REG5D RO, but the 6.13.1 register
+ * list marks it RW and the description says "configured by MCU"; the RW
+ * treatment follows the register list. */
+esp_err_t tg28_sw_set_ts_fixed_threshold(tg28_sw_handle_t handle, uint16_t raw_code)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_FALSE(raw_code <= 0x3FFF, ESP_ERR_INVALID_ARG, TAG,
+                        "ts_cfg_data is a 14-bit code");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const uint8_t high = (uint8_t)((raw_code >> 8) & TG28_SW_TS_FIXED_H_MASK);
+    esp_err_t error = update_bits(handle, TG28_SW_REG_TS_FIXED_H,
+                                  TG28_SW_TS_FIXED_H_MASK, high);
+    if (error == ESP_OK) {
+        const uint8_t low = (uint8_t)(raw_code & 0xFF);
+        error = write_registers(handle, TG28_SW_REG_TS_FIXED_L, &low, 1);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_ts_fixed_threshold(tg28_sw_handle_t handle, uint16_t *raw_code)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && raw_code != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t high = 0, low = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_TS_FIXED_H, &high, 1);
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_TS_FIXED_L, &low, 1);
+    }
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "ts_cfg_data read failed");
+    *raw_code = ((uint16_t)(high & TG28_SW_TS_FIXED_H_MASK) << 8) | low;
+    return ESP_OK;
+}
+
+esp_err_t tg28_sw_set_thermal_regulation(tg28_sw_handle_t handle,
+        tg28_sw_thermal_regulation_t threshold)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_FALSE(threshold >= TG28_SW_THERMAL_REGULATION_60C &&
+                        threshold <= TG28_SW_THERMAL_REGULATION_120C,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid threshold");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_THERMAL_REGULATION,
+                                        TG28_SW_THERMAL_REGULATION_MASK, (uint8_t)threshold);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_thermal_regulation(tg28_sw_handle_t handle,
+        tg28_sw_thermal_regulation_t *threshold)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && threshold != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_THERMAL_REGULATION,
+                                           &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "thermal regulation read failed");
+    *threshold = (tg28_sw_thermal_regulation_t)(value & TG28_SW_THERMAL_REGULATION_MASK);
+    return ESP_OK;
+}
+
+/* Charger safety timers (datasheet 6.13.2.65): REG67 bit7 timer slow in
+ * DPM/thermal, bit6 charge-done timer enable, bits5:4 charge timer,
+ * bit2 pre-charge timer enable, bits1:0 pre-charge timer. */
+esp_err_t tg28_sw_set_charge_timers(tg28_sw_handle_t handle,
+                                    const tg28_sw_charge_timers_t *timers)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && timers != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(timers->precharge_timer >= TG28_SW_PRECHARGE_TIMER_40MIN &&
+                        timers->precharge_timer <= TG28_SW_PRECHARGE_TIMER_70MIN &&
+                        timers->charge_timer >= TG28_SW_CHARGE_TIMER_5H &&
+                        timers->charge_timer <= TG28_SW_CHARGE_TIMER_20H,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid timer selection");
+    const uint8_t image = (timers->timer_slow_during_dpm ? TG28_SW_TIMER_SLOW_DPM_MASK : 0) |
+                          (timers->charge_timer_enable ? TG28_SW_CHARGE_TIMER_ENABLE_MASK : 0) |
+                          ((uint8_t)timers->charge_timer << 4) |
+                          (timers->precharge_timer_enable ? TG28_SW_PRECHARGE_TIMER_ENABLE_MASK : 0) |
+                          (uint8_t)timers->precharge_timer;
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_CHARGE_TIMERS,
+                                        TG28_SW_TIMER_SLOW_DPM_MASK |
+                                        TG28_SW_CHARGE_TIMER_ENABLE_MASK |
+                                        TG28_SW_CHARGE_TIMER_MASK |
+                                        TG28_SW_PRECHARGE_TIMER_ENABLE_MASK |
+                                        TG28_SW_PRECHARGE_TIMER_MASK,
+                                        image);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_charge_timers(tg28_sw_handle_t handle,
+                                    tg28_sw_charge_timers_t *timers)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && timers != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_CHARGE_TIMERS,
+                                           &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "charge timers read failed");
+    timers->timer_slow_during_dpm = (value & TG28_SW_TIMER_SLOW_DPM_MASK) != 0;
+    timers->charge_timer_enable = (value & TG28_SW_CHARGE_TIMER_ENABLE_MASK) != 0;
+    timers->charge_timer = (tg28_sw_charge_timer_t)((value & TG28_SW_CHARGE_TIMER_MASK) >> 4);
+    timers->precharge_timer_enable = (value & TG28_SW_PRECHARGE_TIMER_ENABLE_MASK) != 0;
+    timers->precharge_timer = (tg28_sw_precharge_timer_t)(value & TG28_SW_PRECHARGE_TIMER_MASK);
+    return ESP_OK;
+}
+
+esp_err_t tg28_sw_set_battery_detect_enable(tg28_sw_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_BATTERY_DETECT,
+                                        TG28_SW_BATTERY_DETECT_MASK,
+                                        enable ? TG28_SW_BATTERY_DETECT_MASK : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_battery_detect_enable(tg28_sw_handle_t handle, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && enabled != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_reg_bit_locked(handle, TG28_SW_REG_BATTERY_DETECT,
+                            TG28_SW_BATTERY_DETECT_MASK, enabled);
+    unlock_device(handle);
+    return error;
+}
+
+/* CHGLED (datasheet 6.13.2.67): REG69 bits5:4 manual drive, bits2:1 display
+ * mode, bit0 pin enable. */
+esp_err_t tg28_sw_set_charge_led(tg28_sw_handle_t handle,
+                                 const tg28_sw_charge_led_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(config->mode >= TG28_SW_CHARGE_LED_TYPE_A &&
+                        config->mode <= TG28_SW_CHARGE_LED_MANUAL &&
+                        config->manual_mode >= TG28_SW_CHARGE_LED_MANUAL_HIZ &&
+                        config->manual_mode <= TG28_SW_CHARGE_LED_MANUAL_LOW,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid CHGLED configuration");
+    const uint8_t image = ((uint8_t)config->manual_mode << 4) |
+                          ((uint8_t)config->mode << 1) |
+                          (config->enable ? TG28_SW_CHARGE_LED_ENABLE_MASK : 0);
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_CHARGE_LED,
+                                        TG28_SW_CHARGE_LED_MANUAL_MASK |
+                                        TG28_SW_CHARGE_LED_MODE_MASK |
+                                        TG28_SW_CHARGE_LED_ENABLE_MASK,
+                                        image);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_charge_led(tg28_sw_handle_t handle,
+                                 tg28_sw_charge_led_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_CHARGE_LED, &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "CHGLED read failed");
+    config->manual_mode = (tg28_sw_charge_led_manual_mode_t)((value & TG28_SW_CHARGE_LED_MANUAL_MASK) >> 4);
+    config->mode = (tg28_sw_charge_led_mode_t)((value & TG28_SW_CHARGE_LED_MODE_MASK) >> 1);
+    config->enable = (value & TG28_SW_CHARGE_LED_ENABLE_MASK) != 0;
+    return ESP_OK;
+}
+
+/* Backup/button battery charging (datasheet 6.13.2.68 and 6.12.2): REG18
+ * bit2 enable, REG6A bits2:0 termination 2.6-3.3V in 100mV steps. */
+esp_err_t tg28_sw_set_backup_charge(tg28_sw_handle_t handle, bool enable,
+                                    uint16_t termination_mv)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(encode_step_mv(termination_mv, TG28_SW_VOFF_VOLTAGE_BASE_MV,
+                                       TG28_SW_VOFF_VOLTAGE_STEP_MV,
+                                       TG28_SW_BACKUP_VOLTAGE_MASK, &code),
+                        TAG, "invalid backup termination voltage");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = update_bits(handle, TG28_SW_REG_BACKUP_CHARGE,
+                                  TG28_SW_BACKUP_VOLTAGE_MASK, code);
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_MODULE_ENABLE,
+                            TG28_SW_BACKUP_CHARGE_ENABLE_MASK,
+                            enable ? TG28_SW_BACKUP_CHARGE_ENABLE_MASK : 0);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_backup_charge(tg28_sw_handle_t handle, bool *enabled,
+                                    uint16_t *termination_mv)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_FALSE(enabled != NULL || termination_mv != NULL,
+                        ESP_ERR_INVALID_ARG, TAG, "no output requested");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = ESP_OK;
+    if (termination_mv != NULL) {
+        uint8_t value = 0;
+        error = read_registers(handle, TG28_SW_REG_BACKUP_CHARGE, &value, sizeof(value));
+        if (error == ESP_OK) {
+            *termination_mv = TG28_SW_VOFF_VOLTAGE_BASE_MV +
+                              (value & TG28_SW_BACKUP_VOLTAGE_MASK) * TG28_SW_VOFF_VOLTAGE_STEP_MV;
+        }
+    }
+    if (error == ESP_OK && enabled != NULL) {
+        error = get_reg_bit_locked(handle, TG28_SW_REG_MODULE_ENABLE,
+                                   TG28_SW_BACKUP_CHARGE_ENABLE_MASK, enabled);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_set_min_sys_voltage(tg28_sw_handle_t handle, uint16_t millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    uint8_t code = 0;
+    ESP_RETURN_ON_ERROR(encode_step_mv(millivolts, TG28_SW_MIN_SYS_VOLTAGE_BASE_MV,
+                                       TG28_SW_MIN_SYS_VOLTAGE_STEP_MV,
+                                       TG28_SW_MIN_SYS_VOLTAGE_MASK, &code),
+                        TAG, "invalid minimum system voltage");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_MIN_SYS_VOLTAGE,
+                                        TG28_SW_MIN_SYS_VOLTAGE_MASK, code);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_min_sys_voltage(tg28_sw_handle_t handle, uint16_t *millivolts)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && millivolts != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_MIN_SYS_VOLTAGE,
+                                           &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "minimum system voltage read failed");
+    *millivolts = TG28_SW_MIN_SYS_VOLTAGE_BASE_MV +
+                  (value & TG28_SW_MIN_SYS_VOLTAGE_MASK) * TG28_SW_MIN_SYS_VOLTAGE_STEP_MV;
+    return ESP_OK;
+}
+
+/* REG27 timing-window tables (datasheet 6.13.2.25). */
+static esp_err_t encode_from_table(uint16_t value, const uint16_t *table,
+                                   uint8_t table_size, uint8_t *code)
+{
+    for (uint8_t i = 0; i < table_size; i++) {
+        if (table[i] == value) {
+            *code = i;
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_INVALID_ARG;
+}
+
+/* Power-off policy (datasheet 6.13.2.20-22,25). REG23 bit4 is reserved with
+ * a POR-1 value; the read-modify-write below preserves it. */
+esp_err_t tg28_sw_set_poweroff_config(tg28_sw_handle_t handle,
+                                      const tg28_sw_poweroff_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_FALSE(config->dcdc_uvp_shutdown_mask <= 0x0F,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid UVP mask");
+    static const uint16_t irqlevel_table[4] = {1000, 1500, 2000, 2500};
+    static const uint16_t offlevel_table[4] = {4000, 6000, 8000, 10000};
+    static const uint16_t onlevel_table[4] = {128, 512, 1000, 2000};
+    uint8_t irqlevel = 0, offlevel = 0, onlevel = 0, voff = 0;
+    ESP_RETURN_ON_ERROR(encode_from_table(config->irqlevel_ms, irqlevel_table, 4, &irqlevel),
+                        TAG, "invalid IRQLEVEL");
+    ESP_RETURN_ON_ERROR(encode_from_table(config->offlevel_ms, offlevel_table, 4, &offlevel),
+                        TAG, "invalid OFFLEVEL");
+    ESP_RETURN_ON_ERROR(encode_from_table(config->onlevel_ms, onlevel_table, 4, &onlevel),
+                        TAG, "invalid ONLEVEL");
+    ESP_RETURN_ON_ERROR(encode_step_mv(config->voff_mv, TG28_SW_VOFF_VOLTAGE_BASE_MV,
+                                       TG28_SW_VOFF_VOLTAGE_STEP_MV,
+                                       TG28_SW_VOFF_VOLTAGE_MASK, &voff),
+                        TAG, "invalid VOFF threshold");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = update_bits(handle, TG28_SW_REG_PWROFF_EN,
+                                  TG28_SW_PWROFF_DIE_OT2_MASK |
+                                  TG28_SW_PWROFF_OFFLEVEL_MASK |
+                                  TG28_SW_PWROFF_BUTTON_RESTART_MASK,
+                                  (config->die_ot_level2_off_enable ? TG28_SW_PWROFF_DIE_OT2_MASK : 0) |
+                                  (config->pwron_offlevel_off_enable ? TG28_SW_PWROFF_OFFLEVEL_MASK : 0) |
+                                  (config->button_off_as_restart ? TG28_SW_PWROFF_BUTTON_RESTART_MASK : 0));
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_DCDC_PWROFF_EN,
+                            TG28_SW_DCDC_OVP_PWROFF_MASK | TG28_SW_DCDC_UVP_PWROFF_MASK,
+                            (config->dcdc_ovp_shutdown ? TG28_SW_DCDC_OVP_PWROFF_MASK : 0) |
+                            (config->dcdc_uvp_shutdown_mask & TG28_SW_DCDC_UVP_PWROFF_MASK));
+    }
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_VOFF_THRESHOLD,
+                            TG28_SW_VOFF_VOLTAGE_MASK, voff);
+    }
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_POWER_KEY_LEVELS,
+                            TG28_SW_IRQLEVEL_MASK | TG28_SW_OFFLEVEL_MASK | TG28_SW_ONLEVEL_MASK,
+                            (irqlevel << 4) | (offlevel << 2) | onlevel);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_poweroff_config(tg28_sw_handle_t handle,
+                                      tg28_sw_poweroff_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    static const uint16_t irqlevel_table[4] = {1000, 1500, 2000, 2500};
+    static const uint16_t offlevel_table[4] = {4000, 6000, 8000, 10000};
+    static const uint16_t onlevel_table[4] = {128, 512, 1000, 2000};
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t pwroff_en = 0, dcdc_pwroff = 0, voff_reg = 0, levels = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_PWROFF_EN, &pwroff_en, 1);
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_DCDC_PWROFF_EN, &dcdc_pwroff, 1);
+    }
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_VOFF_THRESHOLD, &voff_reg, 1);
+    }
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_POWER_KEY_LEVELS, &levels, 1);
+    }
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "power-off policy read failed");
+    config->die_ot_level2_off_enable = (pwroff_en & TG28_SW_PWROFF_DIE_OT2_MASK) != 0;
+    config->pwron_offlevel_off_enable = (pwroff_en & TG28_SW_PWROFF_OFFLEVEL_MASK) != 0;
+    config->button_off_as_restart = (pwroff_en & TG28_SW_PWROFF_BUTTON_RESTART_MASK) != 0;
+    config->dcdc_ovp_shutdown = (dcdc_pwroff & TG28_SW_DCDC_OVP_PWROFF_MASK) != 0;
+    config->dcdc_uvp_shutdown_mask = dcdc_pwroff & TG28_SW_DCDC_UVP_PWROFF_MASK;
+    config->voff_mv = TG28_SW_VOFF_VOLTAGE_BASE_MV +
+                      (voff_reg & TG28_SW_VOFF_VOLTAGE_MASK) * TG28_SW_VOFF_VOLTAGE_STEP_MV;
+    config->irqlevel_ms = irqlevel_table[(levels & TG28_SW_IRQLEVEL_MASK) >> 4];
+    config->offlevel_ms = offlevel_table[(levels & TG28_SW_OFFLEVEL_MASK) >> 2];
+    config->onlevel_ms = onlevel_table[levels & TG28_SW_ONLEVEL_MASK];
+    return ESP_OK;
+}
+
+/* Sleep/wakeup (datasheet 6.13.2.24): REG26 bit4 IRQ wakeup, bit3 PWROK
+ * low-level on wakeup, bit2 wakeup voltage select, bit1 wakeup enable
+ * (RWLC), bit0 sleep enable (RWLC). */
+esp_err_t tg28_sw_set_sleep_config(tg28_sw_handle_t handle,
+                                   const tg28_sw_sleep_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    const uint8_t image = (config->irq_wakeup_enable ? TG28_SW_WAKEUP_IRQ_MASK : 0) |
+                          (config->pwrok_low_level_wakeup_enable ? TG28_SW_WAKEUP_PWROK_LOW_MASK : 0) |
+                          (config->wakeup_voltage_from_before_sleep ? TG28_SW_WAKEUP_VOLTAGE_MASK : 0) |
+                          (config->wakeup_enable ? TG28_SW_WAKEUP_ENABLE_MASK : 0) |
+                          (config->sleep_enable ? TG28_SW_SLEEP_ENABLE_MASK : 0);
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_SLEEP_WAKEUP,
+                                        TG28_SW_WAKEUP_IRQ_MASK |
+                                        TG28_SW_WAKEUP_PWROK_LOW_MASK |
+                                        TG28_SW_WAKEUP_VOLTAGE_MASK |
+                                        TG28_SW_WAKEUP_ENABLE_MASK |
+                                        TG28_SW_SLEEP_ENABLE_MASK,
+                                        image);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_sleep_config(tg28_sw_handle_t handle,
+                                   tg28_sw_sleep_config_t *config)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && config != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_SLEEP_WAKEUP,
+                                           &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "sleep/wakeup read failed");
+    config->irq_wakeup_enable = (value & TG28_SW_WAKEUP_IRQ_MASK) != 0;
+    config->pwrok_low_level_wakeup_enable = (value & TG28_SW_WAKEUP_PWROK_LOW_MASK) != 0;
+    config->wakeup_voltage_from_before_sleep = (value & TG28_SW_WAKEUP_VOLTAGE_MASK) != 0;
+    config->wakeup_enable = (value & TG28_SW_WAKEUP_ENABLE_MASK) != 0;
+    config->sleep_enable = (value & TG28_SW_SLEEP_ENABLE_MASK) != 0;
+    return ESP_OK;
+}
+
+esp_err_t tg28_sw_set_gpio1_config(tg28_sw_handle_t handle,
+                                   tg28_sw_gpio1_output_t output)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_FALSE(output >= TG28_SW_GPIO1_OUTPUT_HIZ &&
+                        output <= TG28_SW_GPIO1_OUTPUT_LOW,
+                        ESP_ERR_INVALID_ARG, TAG, "reserved GPIO1 output code");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_GPIO1_CONFIG,
+                                        TG28_SW_GPIO1_OUTPUT_MASK,
+                                        (uint8_t)output << 2);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_gpio1_config(tg28_sw_handle_t handle,
+                                   tg28_sw_gpio1_output_t *output)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && output != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t value = 0;
+    const esp_err_t error = read_registers(handle, TG28_SW_REG_GPIO1_CONFIG,
+                                           &value, sizeof(value));
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "GPIO1 config read failed");
+    const uint8_t code = (value & TG28_SW_GPIO1_OUTPUT_MASK) >> 2;
+    /* Codes 10b/11b are reserved; report them as Hi-z, the safe state. */
+    *output = code <= TG28_SW_GPIO1_OUTPUT_LOW ? (tg28_sw_gpio1_output_t)code
+              : TG28_SW_GPIO1_OUTPUT_HIZ;
+    return ESP_OK;
+}
+
+/* DCDC modes (datasheet 6.13.2.69-70): REG80 bit6 force CCM, bit5 DVM ramp;
+ * REG81 bit7 spread enable, bit6 spread range, bits5:2 force-PWM per rail
+ * (bit2 = DCDC1 ... bit5 = DCDC4). */
+esp_err_t tg28_sw_set_dcdc_mode(tg28_sw_handle_t handle,
+                                const tg28_sw_dcdc_mode_t *mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && mode != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    esp_err_t error = update_bits(handle, TG28_SW_REG_DCDC_ENABLE,
+                                  TG28_SW_DCDC_FORCE_CCM_MASK | TG28_SW_DCDC_DVM_RAMP_MASK,
+                                  (mode->force_ccm ? TG28_SW_DCDC_FORCE_CCM_MASK : 0) |
+                                  (mode->dvm_ramp_slow ? TG28_SW_DCDC_DVM_RAMP_MASK : 0));
+    if (error == ESP_OK) {
+        uint8_t pwm_bits = 0;
+        for (int rail = 0; rail < 4; rail++) {
+            if (mode->force_pwm[rail]) {
+                pwm_bits |= (uint8_t)(1U << (2 + rail));
+            }
+        }
+        error = update_bits(handle, TG28_SW_REG_DCDC_FORCE_PWM,
+                            TG28_SW_DCDC_SPREAD_ENABLE_MASK |
+                            TG28_SW_DCDC_SPREAD_RANGE_MASK |
+                            TG28_SW_DCDC_FORCE_PWM_MASK,
+                            (mode->spread_spectrum_enable ? TG28_SW_DCDC_SPREAD_ENABLE_MASK : 0) |
+                            (mode->spread_range_100khz ? TG28_SW_DCDC_SPREAD_RANGE_MASK : 0) |
+                            pwm_bits);
+    }
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_dcdc_mode(tg28_sw_handle_t handle,
+                                tg28_sw_dcdc_mode_t *mode)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && mode != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    uint8_t reg80 = 0, reg81 = 0;
+    esp_err_t error = read_registers(handle, TG28_SW_REG_DCDC_ENABLE, &reg80, 1);
+    if (error == ESP_OK) {
+        error = read_registers(handle, TG28_SW_REG_DCDC_FORCE_PWM, &reg81, 1);
+    }
+    unlock_device(handle);
+    ESP_RETURN_ON_ERROR(error, TAG, "DCDC mode read failed");
+    mode->force_ccm = (reg80 & TG28_SW_DCDC_FORCE_CCM_MASK) != 0;
+    mode->dvm_ramp_slow = (reg80 & TG28_SW_DCDC_DVM_RAMP_MASK) != 0;
+    mode->spread_spectrum_enable = (reg81 & TG28_SW_DCDC_SPREAD_ENABLE_MASK) != 0;
+    mode->spread_range_100khz = (reg81 & TG28_SW_DCDC_SPREAD_RANGE_MASK) != 0;
+    for (int rail = 0; rail < 4; rail++) {
+        mode->force_pwm[rail] = (reg81 & (1U << (2 + rail))) != 0;
+    }
+    return ESP_OK;
+}
+
+esp_err_t tg28_sw_soft_reset(tg28_sw_handle_t handle)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    /* REG10 bit1 is an RWAC command bit (datasheet 6.13.2.7): once the write
+     * is acknowledged the whole PMU restarts, every rail cycles, and the
+     * system registers reset to defaults; there is nothing left to unlock
+     * on success. */
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_COMMON_CONFIG,
+                                        TG28_SW_SOFTWARE_RESET_MASK,
+                                        TG28_SW_SOFTWARE_RESET_MASK);
+    if (error != ESP_OK) {
+        unlock_device(handle);
+    }
+    return error;
+}
+
+esp_err_t tg28_sw_set_batfet_off_state_enable(tg28_sw_handle_t handle, bool enable)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = update_bits(handle, TG28_SW_REG_BATFET_CONTROL,
+                                        TG28_SW_BATFET_OFF_ENABLE_MASK,
+                                        enable ? TG28_SW_BATFET_OFF_ENABLE_MASK : 0);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_get_batfet_off_state_enable(tg28_sw_handle_t handle, bool *enabled)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL && enabled != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = get_reg_bit_locked(handle, TG28_SW_REG_BATFET_CONTROL,
+                            TG28_SW_BATFET_OFF_ENABLE_MASK, enabled);
+    unlock_device(handle);
+    return error;
+}
+
+esp_err_t tg28_sw_write_register(tg28_sw_handle_t handle, uint8_t register_address,
+                                 uint8_t value)
+{
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+    const esp_err_t error = write_registers(handle, register_address, &value, sizeof(value));
     unlock_device(handle);
     return error;
 }

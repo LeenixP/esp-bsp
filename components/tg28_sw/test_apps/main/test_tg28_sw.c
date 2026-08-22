@@ -295,6 +295,88 @@ static void test_low_battery_warning_coding(void)
     assert(level1 == 15 && level2 == 20);
 }
 
+/* The feature-block enums are the register codes themselves (datasheet
+ * 6.13.2.x); assert the ordering so an accidental reorder breaks the build
+ * tests instead of silently programming wrong values. */
+static void test_feature_block_enum_codings(void)
+{
+    assert(TG28_SW_BATTERY_MODEL_SIZE == 128);
+
+    assert(TG28_SW_WATCHDOG_PERIOD_1S == 0 && TG28_SW_WATCHDOG_PERIOD_128S == 7);
+    assert(TG28_SW_WATCHDOG_ACTION_IRQ_ONLY == 0 &&
+           TG28_SW_WATCHDOG_ACTION_IRQ_RESET_PWRCYCLE == 3);
+
+    assert(TG28_SW_JEITA_CV_ADJUST_NONE == 0 && TG28_SW_JEITA_CV_ADJUST_TWO_GEARS == 2);
+
+    assert(TG28_SW_THERMAL_REGULATION_60C == 0 && TG28_SW_THERMAL_REGULATION_120C == 3);
+
+    assert(TG28_SW_PRECHARGE_TIMER_40MIN == 0 && TG28_SW_PRECHARGE_TIMER_70MIN == 3);
+    assert(TG28_SW_CHARGE_TIMER_5H == 0 && TG28_SW_CHARGE_TIMER_20H == 3);
+
+    assert(TG28_SW_CHARGE_LED_TYPE_A == 0 && TG28_SW_CHARGE_LED_MANUAL == 2);
+    assert(TG28_SW_CHARGE_LED_MANUAL_HIZ == 0 && TG28_SW_CHARGE_LED_MANUAL_LOW == 3);
+
+    assert(TG28_SW_GPIO1_OUTPUT_HIZ == 0 && TG28_SW_GPIO1_OUTPUT_LOW == 1);
+}
+
+/* Every public entry point validates its handle before touching the bus, so
+ * NULL calls fail cheaply without any hardware. */
+static void test_feature_block_null_rejections(void)
+{
+    bool flag = false;
+    uint16_t mv = 0;
+    tg28_sw_watchdog_config_t watchdog = {0};
+    tg28_sw_ts_thresholds_t thresholds = {0};
+    tg28_sw_jeita_config_t jeita = {0};
+    tg28_sw_charge_timers_t timers = {0};
+    tg28_sw_charge_led_config_t charge_led = {0};
+    tg28_sw_poweroff_config_t poweroff = {0};
+    tg28_sw_sleep_config_t sleep_cfg = {0};
+    tg28_sw_dcdc_mode_t dcdc = {0};
+
+    assert(tg28_sw_set_charge_enable(NULL, true) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_charge_enable(NULL, &flag) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_watchdog(NULL, &watchdog) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_watchdog(NULL, &watchdog) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_feed_watchdog(NULL) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_gauge_enable(NULL, true) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_gauge_enable(NULL, &flag) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_ts_thresholds(NULL, &thresholds) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_ts_thresholds(NULL, &thresholds) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_jeita(NULL, &jeita) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_jeita(NULL, &jeita) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_ts_fixed_threshold(NULL, 0) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_ts_fixed_threshold(NULL, &mv) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_thermal_regulation(NULL, TG28_SW_THERMAL_REGULATION_80C) ==
+           ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_thermal_regulation(NULL, NULL) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_charge_timers(NULL, &timers) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_charge_timers(NULL, &timers) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_battery_detect_enable(NULL, true) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_battery_detect_enable(NULL, &flag) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_charge_led(NULL, &charge_led) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_charge_led(NULL, &charge_led) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_backup_charge(NULL, true, 3000) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_backup_charge(NULL, &flag, &mv) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_min_sys_voltage(NULL, 3500) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_min_sys_voltage(NULL, &mv) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_poweroff_config(NULL, &poweroff) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_poweroff_config(NULL, &poweroff) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_sleep_config(NULL, &sleep_cfg) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_sleep_config(NULL, &sleep_cfg) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_gpio1_config(NULL, TG28_SW_GPIO1_OUTPUT_LOW) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_gpio1_config(NULL, NULL) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_dcdc_mode(NULL, &dcdc) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_dcdc_mode(NULL, &dcdc) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_soft_reset(NULL) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_set_batfet_off_state_enable(NULL, true) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_get_batfet_off_state_enable(NULL, &flag) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_write_register(NULL, 0x10, 0x00) == ESP_ERR_INVALID_ARG);
+
+    /* The 14-bit ts_cfg_data bound is validated before any bus access. */
+    assert(tg28_sw_set_ts_fixed_threshold(NULL, 0x4000) == ESP_ERR_INVALID_ARG);
+}
+
 void app_main(void)
 {
     test_chip_id_and_names();
@@ -309,4 +391,6 @@ void app_main(void)
     test_switch_names();
     test_irq_numbering();
     test_low_battery_warning_coding();
+    test_feature_block_enum_codings();
+    test_feature_block_null_rejections();
 }

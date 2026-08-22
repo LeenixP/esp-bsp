@@ -24,7 +24,7 @@ extern "C" {
 /** Vendor generic 4.2 V-class reference model; GPL-origin data, see the
  *  source-file header before redistributing. */
 extern const uint8_t bsp_pmic_reference_battery_model[
-    BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE];
+     BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE];
 
 #ifdef __cplusplus
 }

@@ -22,7 +22,7 @@ dependencies:
     override_path: "../../components/rx8130ce"
 
   espressif/tg28_sw:
-    version: "^0.3.0"
+    version: "^0.4.0"
     public: false
     override_path: "../../components/tg28_sw"
 
