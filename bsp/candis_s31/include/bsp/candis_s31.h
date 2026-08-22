@@ -616,6 +616,8 @@ esp_err_t bsp_pmic_set_vindpm(uint16_t millivolts);
 esp_err_t bsp_pmic_get_vindpm(uint16_t *millivolts);
 esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts);
 esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts);
+esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
+                                  size_t count);
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size);
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_t millivolts);
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);
