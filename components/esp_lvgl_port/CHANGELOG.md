@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## 2.9.0
+
+### Features
+
+- Added optional TE (tearing effect) synchronization for GRAM-type displays (SPI/QSPI/I80): the first transfer of every LVGL refresh cycle is gated on the panel TE rising edge (LVGL 9 only)
+- Added `lvgl_port_display_te_sync_enable()` runtime switch and `lvgl_port_display_te_observer_set()` non-owning TE edge observer API (LVGL 9 only)
+- Added coalesced full-width band transfer for DIRECT mode on GRAM-type panels: dirty areas of a refresh cycle are joined and transmitted once per cycle (LVGL 9 only)
+- Added flush-completion wait for SPI/I80 double-buffered transfers so LVGL never renders into a buffer whose DMA transfer is still in flight (LVGL 9)
 
 ### Fixes
 
 - Fixed callbacks for DPI by IDF update (`on_refresh_done` --> `on_frame_buf_complete`)
+- Fixed potential hang after a failed panel transfer: the flush-wait semaphore is now released on the draw error path
 
 ## 2.8.0
 

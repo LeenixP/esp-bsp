@@ -84,9 +84,6 @@ typedef struct {
      * ongoing refresh cycle are joined here and transmitted once per cycle. */
     lv_area_t                 cycle_area;   /* Joined dirty area of the ongoing refresh cycle */
     bool                      cycle_area_valid;
-    /* Frame timing stamps for the DIRECT band path diagnostics. */
-    volatile int64_t          last_tx_start_us; /* Band DMA start (flush task ctx) */
-    volatile int64_t          last_tx_done_us;  /* Band DMA done (ISR ctx) */
 #if LVGL_PORT_PPA
     lvgl_port_ppa_handle_t    ppa_handle;
 #endif //LVGL_PORT_PPA
@@ -688,9 +685,6 @@ static bool lvgl_port_flush_io_ready_callback(esp_lcd_panel_io_handle_t panel_io
     lvgl_port_display_ctx_t *disp_ctx = (lvgl_port_display_ctx_t *)lv_display_get_driver_data(disp_drv);
     assert(disp_ctx != NULL);
 
-    if (disp_ctx->flags.direct_mode) {
-        disp_ctx->last_tx_done_us = esp_timer_get_time();
-    }
     lv_disp_flush_ready(disp_drv);
     xSemaphoreGiveFromISR(disp_ctx->trans_sem, &need_yield);
     return (need_yield == pdTRUE);
@@ -883,13 +877,6 @@ static void lvgl_port_flush_direct_band(lv_display_t *drv, const lv_area_t *area
     }
     disp_ctx->cycle_area_valid = false;
 
-    /* Frame timing diagnostics (one log line per 120 transmitted bands):
-     * render->flush entry, TE wait, and DMA transfer phases. */
-    static uint32_t s_diag_count;
-    int64_t diag_te_us = 0;
-    const int64_t t_flush = esp_timer_get_time();
-    const bool diag_log = s_diag_count != 0U && (s_diag_count % 120U) == 0U;
-
     const int32_t hres = lv_display_get_horizontal_resolution(drv);
     const int32_t vres = lv_display_get_vertical_resolution(drv);
     int32_t y1 = disp_ctx->cycle_area.y1;
@@ -912,31 +899,18 @@ static void lvgl_port_flush_direct_band(lv_display_t *drv, const lv_area_t *area
     if (disp_ctx->te_sem != NULL && disp_ctx->te_sync_enabled) {
         lvgl_port_te_wait(disp_ctx);
     }
-    if (diag_log) {
-        diag_te_us = esp_timer_get_time();
-    }
 
     const size_t px_size = lv_color_format_get_size(lv_display_get_color_format(drv));
     uint8_t *band = color_map + (size_t)y1 * (size_t)hres * px_size;
-    const int64_t previous_tx_start_us = disp_ctx->last_tx_start_us;
-    const int64_t previous_tx_done_us = disp_ctx->last_tx_done_us;
-    disp_ctx->last_tx_start_us = esp_timer_get_time();
     const esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle,
                                                          0, y1, hres, y2 + 1, band);
-    if (diag_log) {
-        /* Spans refer to the previous band: tx_done is stamped by the
-         * transfer-done ISR. render_sched = prev tx_done -> this flush entry
-         * (LVGL render + scheduling); te_wait = flush entry -> TE edge;
-         * prev_tx = previous DMA transfer duration. */
-        ESP_LOGI(TAG, "band y=%d..%d render_sched=%lldus te_wait=%lldus prev_tx=%lldus",
-                 (int)y1, (int)y2,
-                 (long long)(t_flush - previous_tx_done_us),
-                 (long long)(diag_te_us - t_flush),
-                 (long long)(previous_tx_done_us - previous_tx_start_us));
-    }
-    s_diag_count++;
     if (draw_err != ESP_OK) {
         ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+        /* Keep the pipeline unblocked: the flush-wait hook of the next cycle
+         * takes this semaphore before LVGL reuses the frame buffer. */
+        if (disp_ctx->trans_sem) {
+            xSemaphoreGive(disp_ctx->trans_sem);
+        }
         lv_disp_flush_ready(drv);
     }
     /* A successful transfer is completed by flush_io_ready_callback(). */
@@ -1046,6 +1020,9 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
                                                            color_map);
             if (draw_err != ESP_OK) {
                 ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+                /* No completion ISR will fire: release one count so the next
+                 * cycle's wait cannot deadlock on this failed transfer. */
+                xSemaphoreGive(disp_ctx->trans_sem);
             } else {
                 /* Waiting for the last frame buffer to complete transmission */
                 xSemaphoreTake(disp_ctx->trans_sem, 0);
@@ -1060,6 +1037,11 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
                                                        offsetx2 + 1, offsety2 + 1, color_map);
         if (draw_err != ESP_OK) {
             ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
+            /* Keep the flush-wait hook of the next cycle from blocking on a
+             * completion that will never arrive. */
+            if (disp_ctx->trans_sem) {
+                xSemaphoreGive(disp_ctx->trans_sem);
+            }
             lv_disp_flush_ready(drv);
         }
     }
