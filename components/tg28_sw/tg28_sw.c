@@ -116,7 +116,6 @@
 /* REG18 module enables (datasheet 6.13.2.14). */
 #define TG28_SW_GAUGE_ENABLE_MASK        (1U << 3)
 #define TG28_SW_BACKUP_CHARGE_ENABLE_MASK (1U << 2)
-#define TG28_SW_CHARGE_ENABLE_MASK       (1U << 1)
 #define TG28_SW_WATCHDOG_ENABLE_MASK     (1U << 0)
 /* REG19 watchdog control (datasheet 6.13.2.15). */
 #define TG28_SW_WATCHDOG_ACTION_MASK     0x30
@@ -1488,8 +1487,8 @@ esp_err_t tg28_sw_set_charge_enable(tg28_sw_handle_t handle, bool enable)
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid handle");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits(handle, TG28_SW_REG_MODULE_ENABLE,
-                                        TG28_SW_CHARGE_ENABLE_MASK,
-                                        enable ? TG28_SW_CHARGE_ENABLE_MASK : 0);
+                                        TG28_SW_CHARGER_ENABLE_MASK,
+                                        enable ? TG28_SW_CHARGER_ENABLE_MASK : 0);
     unlock_device(handle);
     return error;
 }
@@ -1499,7 +1498,7 @@ esp_err_t tg28_sw_get_charge_enable(tg28_sw_handle_t handle, bool *enabled)
     ESP_RETURN_ON_FALSE(handle != NULL && enabled != NULL, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = get_reg_bit_locked(handle, TG28_SW_REG_MODULE_ENABLE,
-                            TG28_SW_CHARGE_ENABLE_MASK, enabled);
+                            TG28_SW_CHARGER_ENABLE_MASK, enabled);
     unlock_device(handle);
     return error;
 }
@@ -2215,4 +2214,56 @@ esp_err_t tg28_sw_write_register(tg28_sw_handle_t handle, uint8_t register_addre
     const esp_err_t error = write_registers(handle, register_address, &value, sizeof(value));
     unlock_device(handle);
     return error;
+}
+
+esp_err_t tg28_sw_read_battery_model(tg28_sw_handle_t handle,
+                                     tg28_sw_battery_model_source_t source,
+                                     uint8_t *model, size_t size)
+{
+    ESP_RETURN_ON_FALSE(model != NULL, ESP_ERR_INVALID_ARG, TAG, "model buffer is NULL");
+    ESP_RETURN_ON_FALSE(size == TG28_SW_BATTERY_MODEL_SIZE, ESP_ERR_INVALID_SIZE,
+                        TAG, "battery model must be exactly %u bytes", TG28_SW_BATTERY_MODEL_SIZE);
+    ESP_RETURN_ON_FALSE(source >= TG28_SW_BATTERY_MODEL_ROM &&
+                        source <= TG28_SW_BATTERY_MODEL_SRAM,
+                        ESP_ERR_INVALID_ARG, TAG, "invalid model source");
+    ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
+
+    /* Mirror the verification half of tg28_sw_program_battery_model():
+     * gauge reset, BROM open, source select, 128 reads of REGA1, BROM
+     * close, gauge reset. No register content is modified apart from the
+     * REGA2 source-select bit, which is restored to SRAM operation. */
+    esp_err_t error = reset_gauge_mcu(handle);
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, false);
+    }
+    if (error == ESP_OK) {
+        error = set_brom_writer(handle, true);
+    }
+    if (error == ESP_OK) {
+        error = update_bits(handle, TG28_SW_REG_FUEL_GAUGE_CONTROL,
+                            TG28_SW_BROM_UPDATE_MARK_MASK,
+                            source == TG28_SW_BATTERY_MODEL_SRAM ?
+                            TG28_SW_BROM_UPDATE_MARK_MASK : 0);
+    }
+    for (size_t i = 0; error == ESP_OK && i < size; ++i) {
+        error = read_registers(handle, TG28_SW_REG_BATTERY_MODEL,
+                               &model[i], sizeof(model[i]));
+    }
+
+    esp_err_t cleanup_error = set_brom_writer(handle, false);
+    if (cleanup_error == ESP_OK) {
+        /* Leave the gauge running from SRAM, the normal operating state. */
+        cleanup_error = update_bits(handle, TG28_SW_REG_FUEL_GAUGE_CONTROL,
+                                    TG28_SW_BROM_UPDATE_MARK_MASK,
+                                    TG28_SW_BROM_UPDATE_MARK_MASK);
+    }
+    const esp_err_t gauge_reset_error = reset_gauge_mcu(handle);
+    if (cleanup_error == ESP_OK) {
+        cleanup_error = gauge_reset_error;
+    }
+    unlock_device(handle);
+    if (error != ESP_OK) {
+        return error;
+    }
+    return cleanup_error;
 }

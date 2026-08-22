@@ -388,6 +388,15 @@ esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
     return tg28_sw_read_registers(s_pmic, register_address, values, count);
 }
 
+esp_err_t bsp_pmic_read_battery_model(bool from_sram, uint8_t *model, size_t size)
+{
+    ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");
+    return tg28_sw_read_battery_model(s_pmic,
+                                      from_sram ? TG28_SW_BATTERY_MODEL_SRAM
+                                      : TG28_SW_BATTERY_MODEL_ROM,
+                                      model, size);
+}
+
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)
 {
     ESP_RETURN_ON_ERROR(bsp_pmic_init(), TAG, "TG28_SW is unavailable");

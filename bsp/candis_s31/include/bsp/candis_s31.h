@@ -618,6 +618,12 @@ esp_err_t bsp_pmic_set_charge_voltage(uint16_t millivolts);
 esp_err_t bsp_pmic_get_charge_voltage(uint16_t *millivolts);
 esp_err_t bsp_pmic_read_registers(uint8_t register_address, uint8_t *values,
                                   size_t count);
+/** Dump the TG28 fuel-gauge battery model area (128 bytes) into model.
+ *  from_sram selects the programmed/learned SRAM area, false the factory
+ *  ROM area. See tg28_sw_read_battery_model() for the procedure and the
+ *  EVT open questions. */
+esp_err_t bsp_pmic_read_battery_model(bool from_sram, uint8_t *model,
+                                      size_t size);
 esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size);
 esp_err_t bsp_pmic_regulator_set_voltage(bsp_pmic_regulator_t regulator, uint16_t millivolts);
 esp_err_t bsp_pmic_regulator_get_voltage(bsp_pmic_regulator_t regulator, uint16_t *millivolts);

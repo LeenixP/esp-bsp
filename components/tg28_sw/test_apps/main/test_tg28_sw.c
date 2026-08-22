@@ -372,6 +372,8 @@ static void test_feature_block_null_rejections(void)
     assert(tg28_sw_set_batfet_off_state_enable(NULL, true) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_get_batfet_off_state_enable(NULL, &flag) == ESP_ERR_INVALID_ARG);
     assert(tg28_sw_write_register(NULL, 0x10, 0x00) == ESP_ERR_INVALID_ARG);
+    assert(tg28_sw_read_battery_model(NULL, TG28_SW_BATTERY_MODEL_SRAM, NULL, 0) ==
+           ESP_ERR_INVALID_ARG);
 
     /* The 14-bit ts_cfg_data bound is validated before any bus access. */
     assert(tg28_sw_set_ts_fixed_threshold(NULL, 0x4000) == ESP_ERR_INVALID_ARG);

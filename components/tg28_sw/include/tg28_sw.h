@@ -640,6 +640,34 @@ esp_err_t tg28_sw_get_low_battery_warning(tg28_sw_handle_t handle,
 esp_err_t tg28_sw_program_battery_model(tg28_sw_handle_t handle,
                                         const uint8_t *model, size_t size);
 
+/** Fuel-gauge battery-model storage area selection (REGA2 bit4, datasheet
+ * 6.13.2.87). */
+typedef enum {
+    /** Factory ROM area. */
+    TG28_SW_BATTERY_MODEL_ROM = 0,
+    /** SRAM area - the area tg28_sw_program_battery_model() writes and the
+     *  gauge learns into. */
+    TG28_SW_BATTERY_MODEL_SRAM = 1,
+} tg28_sw_battery_model_source_t;
+
+/**
+ * @brief Read back the fuel-gauge battery model (REGA1 window, datasheet
+ * 6.13.2.86; procedure per hardware design guide 6.2).
+ *
+ * Mirrors the verification half of tg28_sw_program_battery_model(): gauge
+ * MCU reset, BROM open, 128 sequential reads of REGA1, BROM close, gauge
+ * reset. size must equal TG28_SW_BATTERY_MODEL_SIZE. The charger state is
+ * not touched.
+ *
+ * EVT note: whether the gauge's automatic learning (datasheet 6.11) lands
+ * in the readable SRAM area, and whether the ROM area holds a meaningful
+ * factory default, are hardware-verification items - dump both areas and
+ * compare against a known-good model to find out.
+ */
+esp_err_t tg28_sw_read_battery_model(tg28_sw_handle_t handle,
+                                     tg28_sw_battery_model_source_t source,
+                                     uint8_t *model, size_t size);
+
 /** Set one regulator to an exactly representable voltage. */
 esp_err_t tg28_sw_regulator_set_voltage(tg28_sw_handle_t handle,
                                         tg28_sw_regulator_t regulator,

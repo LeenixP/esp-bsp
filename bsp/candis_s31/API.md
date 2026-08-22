@@ -1438,6 +1438,7 @@ int voltage = bsp_voltage_battery_get();
 |  esp\_err\_t | [**bsp\_pmic\_power\_off**](#function-bsp_pmic_power_off) (void) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_program\_battery\_model**](#function-bsp_pmic_program_battery_model) (const uint8\_t \*model, size\_t size) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_read\_adc\_mv**](#function-bsp_pmic_read_adc_mv) ([**bsp\_pmic\_adc\_channel\_t**](#enum-bsp_pmic_adc_channel_t) channel, uint16\_t \*millivolts) <br> |
+|  esp\_err\_t | [**bsp\_pmic\_read\_battery\_model**](#function-bsp_pmic_read_battery_model) (bool from\_sram, uint8\_t \*model, size\_t size) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_read\_registers**](#function-bsp_pmic_read_registers) (uint8\_t register\_address, uint8\_t \*values, size\_t count) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_enable**](#function-bsp_pmic_regulator_enable) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, bool enable) <br> |
 |  esp\_err\_t | [**bsp\_pmic\_regulator\_get\_voltage**](#function-bsp_pmic_regulator_get_voltage) ([**bsp\_pmic\_regulator\_t**](#enum-bsp_pmic_regulator_t) regulator, uint16\_t \*millivolts) <br> |
@@ -1765,6 +1766,18 @@ esp_err_t bsp_pmic_read_adc_mv (
 
 
 Read one TG28\_SW ADC channel in millivolts. The TDIE channel reports the die-temperature sensor voltage, not a temperature; the TS channel reads the fixed external input fitted on this board (no battery NTC). A channel disabled at the OTP level is enabled for the measurement and restored afterwards.
+### function `bsp_pmic_read_battery_model`
+
+```c
+esp_err_t bsp_pmic_read_battery_model (
+    bool from_sram,
+    uint8_t *model,
+    size_t size
+) 
+```
+
+
+Dump the TG28 fuel-gauge battery model area (128 bytes) into model. from\_sram selects the programmed/learned SRAM area, false the factory ROM area. See tg28\_sw\_read\_battery\_model() for the procedure and the EVT open questions.
 ### function `bsp_pmic_read_registers`
 
 ```c
