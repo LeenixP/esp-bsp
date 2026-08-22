@@ -42,7 +42,7 @@ esp_err_t esp_lcd_touch_new_i2c_cst820(const esp_lcd_panel_io_handle_t io,
  * scanning, stops answering I2C and its INT pin stays inactive: a touch can
  * NOT wake the controller in this mode. The only ways back to dynamic mode
  * are a hardware reset cycle on RST (see esp_lcd_touch_cst820_wakeup()) or a
- * power cycle of the touch supply (ALDO2 on Candis-S31).
+ * power cycle of the touch supply rail.
  *
  * @note Register assumption, pending EVT verification: the CST820 datasheet
  *       (DS_CST_820 V1.2, Hynitron) documents the sleep command but does not
@@ -137,6 +137,42 @@ esp_err_t esp_lcd_touch_cst820_enter_monitor_mode(esp_lcd_touch_handle_t tp);
  *      - Other error codes propagated from GPIO or panel IO operations
  */
 esp_err_t esp_lcd_touch_cst820_exit_monitor_mode(esp_lcd_touch_handle_t tp);
+
+/**
+ * @brief Read one or more CST820 registers (raw fallback channel)
+ *
+ * The public CST820 datasheet does not document the register map, so some
+ * controller features (gesture report bytes, auto-standby control, multi-key
+ * reports) have no structured driver API. This raw accessor lets users
+ * validate firmware-variant behavior directly. Use with care: no locking is
+ * added beyond what the panel IO layer already provides.
+ *
+ * @param tp Touch controller handle
+ * @param reg Register address
+ * @param data Read buffer
+ * @param len Number of bytes to read (must be > 0)
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_ARG if tp or data is NULL
+ *      - ESP_ERR_INVALID_SIZE if len is zero
+ *      - I2C error codes propagated from the panel IO layer
+ */
+esp_err_t esp_lcd_touch_cst820_read_reg(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t *data, size_t len);
+
+/**
+ * @brief Write one CST820 register (raw fallback channel)
+ *
+ * See esp_lcd_touch_cst820_read_reg() for the rationale and caveats.
+ *
+ * @param tp Touch controller handle
+ * @param reg Register address
+ * @param data Value to write
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_ARG if tp is NULL
+ *      - I2C error codes propagated from the panel IO layer
+ */
+esp_err_t esp_lcd_touch_cst820_write_reg(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t data);
 
 /** Default 7-bit I2C address of the CST820 controller. */
 #define ESP_LCD_TOUCH_IO_I2C_CST820_ADDRESS    (0x15)

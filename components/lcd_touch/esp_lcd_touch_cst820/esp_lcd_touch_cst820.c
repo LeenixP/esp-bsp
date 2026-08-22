@@ -275,6 +275,16 @@ esp_err_t esp_lcd_touch_cst820_exit_monitor_mode(esp_lcd_touch_handle_t tp)
     return touch_cst820_wake_by_reset(tp);
 }
 
+esp_err_t esp_lcd_touch_cst820_read_reg(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t *data, size_t len)
+{
+    return touch_cst820_i2c_read(tp, reg, data, len);
+}
+
+esp_err_t esp_lcd_touch_cst820_write_reg(esp_lcd_touch_handle_t tp, uint8_t reg, uint8_t data)
+{
+    return touch_cst820_i2c_write(tp, reg, data);
+}
+
 static esp_err_t esp_lcd_touch_cst820_del(esp_lcd_touch_handle_t tp)
 {
     ESP_RETURN_ON_FALSE(tp != NULL, ESP_ERR_INVALID_ARG, TAG, "Touch controller handle can't be NULL");

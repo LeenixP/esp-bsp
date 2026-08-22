@@ -93,6 +93,14 @@ TEST_CASE("CST820 sleep and monitor APIs reject NULL handles", "[cst820][no-hw]"
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_lcd_touch_exit_sleep(NULL));
 }
 
+TEST_CASE("CST820 raw register accessors reject NULL handles", "[cst820][no-hw]")
+{
+    uint8_t byte = 0;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_lcd_touch_cst820_read_reg(NULL, 0x00, &byte, 1));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_lcd_touch_cst820_write_reg(NULL, 0x00, 0x00));
+}
+
 TEST_CASE("CST820 deep-sleep round-trip", "[cst820][hw]")
 {
     i2c_master_bus_handle_t i2c_bus = NULL;

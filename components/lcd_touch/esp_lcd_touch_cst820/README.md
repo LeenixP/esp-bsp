@@ -27,7 +27,7 @@ Once the component is published to the ESP Component Registry, add it to an
 ESP-IDF project with:
 
 ```sh
-idf.py add-dependency "espressif/esp_lcd_touch_cst820^1.0.0"
+idf.py add-dependency "espressif/esp_lcd_touch_cst820^1.2.0"
 ```
 
 This command is available after registry publication. Until then, reference a
@@ -128,7 +128,7 @@ controller stops scanning and stops answering I2C. Its INT pin is inactive
 in this mode, so **a touch cannot wake the controller or the host from deep
 sleep** — wake-up is only possible through `esp_lcd_touch_cst820_wakeup()`
 (equivalent to `esp_lcd_touch_exit_sleep()`: a hardware reset cycle,
-Tron = 100 ms) or by power-cycling the touch supply (ALDO2 on Candis-S31).
+Tron = 100 ms) or by power-cycling the touch supply rail.
 Use this tier for shipping/storage states.
 
 The sleep command register is not published in the datasheet. The driver
@@ -149,7 +149,8 @@ INT to wake the host. Per the datasheet the controller enters standby
 automatically when no touch is detected for 2 s, so no undocumented
 register write is needed and the driver sends none.
 
-Typical low-power sequence on Candis-S31 (INT = GPIO3, active low):
+Typical low-power sequence (verified on a Candis-S31 board, INT = GPIO3,
+active low):
 
 ```c
 /* 1. Arm monitor mode; the controller reaches standby <= 2 s after the
@@ -178,6 +179,32 @@ Notes:
   to force dynamic mode without a touch. It requires the reset GPIO.
 - If EVT verifies a forced-standby command for this firmware, the enter
   function may start sending it; the API contract stays unchanged.
+
+## Register access and undocumented features
+
+The public CST820 datasheet (DS_CST_820 V1.2) describes the electrical
+interface and power modes but does not publish the register map or the full
+touch-report byte layout. As a result, the following datasheet feature blocks
+have no structured driver API:
+
+- Single-tap and standby gesture reports (the module report carries two
+  leading bytes whose layout is not publicly documented)
+- Auto-standby enable/timeout control (the datasheet states it is
+  register-controlled but does not publish the register)
+- Multi-key reports (the base-class `get_button_state` hook is not
+  implemented because the report layout for keys is not publicly documented)
+
+For these, use the raw register accessors, which are thin wrappers over the
+panel IO channel:
+
+```c
+uint8_t buf[4] = {0};
+ESP_ERROR_CHECK(esp_lcd_touch_cst820_read_reg(touch, 0x00, buf, sizeof(buf)));
+ESP_ERROR_CHECK(esp_lcd_touch_cst820_write_reg(touch, 0x00, 0x00));
+```
+
+Validate any register address against your controller firmware before
+shipping; addresses may differ between module firmware variants.
 
 ## Release resources
 
