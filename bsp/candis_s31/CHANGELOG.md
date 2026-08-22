@@ -29,7 +29,7 @@
 
 ### Notes
 
-* Driver dependencies raised to tg28_sw `^0.3.0`, rx8130ce `^0.4.0`, fusb303b `^0.2.0`
+* Driver dependencies raised to tg28_sw `^0.4.0`, rx8130ce `^0.4.0`, fusb303b `^0.2.0`
 
 …
 
