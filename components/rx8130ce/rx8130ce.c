@@ -403,14 +403,14 @@ esp_err_t rx8130ce_create(i2c_master_bus_handle_t bus,
         error = rx8130ce_read(handle, RX8130CE_REG_FLAGS, &flags, 1);
         if (error == ESP_OK && (flags & RX8130CE_FLAG_VLF) != 0) {
             /* Appman 10.2: with VLF=1, initialize only after waiting out
-             * the oscillator start time t_str (1.0 s max, appman 9.1). */
+             * the oscillator start time t_str (1.0 s max, appman 8). */
             vTaskDelay(pdMS_TO_TICKS(RX8130CE_OSCILLATOR_START_MS));
             error = rx8130ce_initialize_all_registers(handle,
-                                                      config->backup_charge_enable);
+                    config->backup_charge_enable);
         } else if (error == ESP_OK) {
             /* Enable switchover; charge only rechargeable backup sources. */
             error = rx8130ce_configure_backup_supply(handle,
-                                                     config->backup_charge_enable);
+                    config->backup_charge_enable);
         }
     }
     if (error != ESP_OK) {
@@ -959,8 +959,8 @@ esp_err_t rx8130ce_set_fout(rx8130ce_handle_t handle, rx8130ce_fout_t frequency)
                         ESP_ERR_INVALID_ARG, TAG, "invalid FOUT selection");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_EXTENSION,
-                                               RX8130CE_EXTENSION_FSEL_MASK,
-                                               (uint8_t)frequency << 6);
+                            RX8130CE_EXTENSION_FSEL_MASK,
+                            (uint8_t)frequency << 6);
     unlock_device(handle);
     return error;
 }
@@ -986,8 +986,8 @@ esp_err_t rx8130ce_set_update_irq_mode(rx8130ce_handle_t handle, rx8130ce_update
                         ESP_ERR_INVALID_ARG, TAG, "invalid update interrupt mode");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_EXTENSION,
-                                               RX8130CE_EXTENSION_USEL,
-                                               (uint8_t)mode << 5);
+                            RX8130CE_EXTENSION_USEL,
+                            (uint8_t)mode << 5);
     unlock_device(handle);
     return error;
 }
@@ -1019,8 +1019,8 @@ esp_err_t rx8130ce_set_timer_count_mode(rx8130ce_handle_t handle, rx8130ce_timer
                           (mode == RX8130CE_TIMER_COUNT_BACKUP ? RX8130CE_CONTROL0_TBKON : 0));
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_CONTROL0,
-                                               RX8130CE_CONTROL0_TBKE | RX8130CE_CONTROL0_TBKON,
-                                               bits);
+                            RX8130CE_CONTROL0_TBKE | RX8130CE_CONTROL0_TBKON,
+                            bits);
     unlock_device(handle);
     return error;
 }
@@ -1049,8 +1049,8 @@ esp_err_t rx8130ce_timer_pause(rx8130ce_handle_t handle, bool pause)
                         "invalid device handle");
     ESP_RETURN_ON_ERROR(lock_device(handle), TAG, "device lock failed");
     const esp_err_t error = update_bits_locked(handle, RX8130CE_REG_CONTROL0,
-                                               RX8130CE_CONTROL0_TSTP,
-                                               pause ? RX8130CE_CONTROL0_TSTP : 0);
+                            RX8130CE_CONTROL0_TSTP,
+                            pause ? RX8130CE_CONTROL0_TSTP : 0);
     unlock_device(handle);
     return error;
 }

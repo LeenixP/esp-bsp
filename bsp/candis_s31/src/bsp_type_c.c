@@ -98,7 +98,7 @@ static esp_err_t type_c_init_locked(void)
         last_error = fusb303b_create(bus, &config, &s_type_c);
         if (last_error == ESP_OK) {
             last_error = fusb303b_set_role(s_type_c, FUSB303B_ROLE_DRP,
-                                            FUSB303B_CURRENT_DEFAULT);
+                                           FUSB303B_CURRENT_DEFAULT);
         }
         if (last_error == ESP_OK) {
             last_error = fusb303b_set_enabled(s_type_c, true);

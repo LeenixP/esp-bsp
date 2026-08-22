@@ -68,7 +68,8 @@ typedef struct {
 
     bool        monochrome;     /*!< True, if display is monochrome and using 1bit for 1px */
 
-    int         te_gpio_num;    /*!< GPIO number of the panel TE (tearing effect) output. Used only when flags.te_sync is set (LVGL 9 only) */
+    int
+    te_gpio_num;    /*!< GPIO number of the panel TE (tearing effect) output. Used only when flags.te_sync is set (LVGL 9 only) */
 
     lvgl_port_rotation_cfg_t
     rotation;      /*!< Default values of the screen rotation (Only HW state. Not supported for default SW rotation!) */
@@ -85,7 +86,8 @@ typedef struct {
 #endif
         unsigned int full_refresh: 1;/*!< 1: Always make the whole screen redrawn */
         unsigned int direct_mode: 1; /*!< 1: Use screen-sized buffers and draw to absolute coordinates */
-        unsigned int te_sync: 1;     /*!< 1: Gate the first data transfer of every LVGL refresh cycle on a TE rising edge (SPI/I80 GRAM displays, LVGL 9 only). Aligns writes with panel scan timing; adds up to one frame of pipeline latency. Requires the panel TE output to be enabled (0x35) and wired to te_gpio_num */
+unsigned int te_sync:
+        1;     /*!< 1: Gate the first data transfer of every LVGL refresh cycle on a TE rising edge (SPI/I80 GRAM displays, LVGL 9 only). Aligns writes with panel scan timing; adds up to one frame of pipeline latency. Requires the panel TE output to be enabled (0x35) and wired to te_gpio_num */
     } flags;
 } lvgl_port_display_cfg_t;
 

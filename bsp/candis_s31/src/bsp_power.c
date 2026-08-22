@@ -236,29 +236,29 @@ esp_err_t bsp_power_safe_state(void)
      * documented by bsp_power_safe_state(). */
     first_error = safe_state_note(first_error,
                                   tristate_pins(s_camera_pins,
-                                                sizeof(s_camera_pins) /
-                                                sizeof(s_camera_pins[0])),
+                                          sizeof(s_camera_pins) /
+                                          sizeof(s_camera_pins[0])),
                                   "camera pins hi-Z");
     const gpio_num_t touch_pins[] = { BSP_TOUCH_RST, BSP_TOUCH_INT };
     first_error = safe_state_note(first_error,
                                   tristate_pins(touch_pins,
-                                                sizeof(touch_pins) /
-                                                sizeof(touch_pins[0])),
+                                          sizeof(touch_pins) /
+                                          sizeof(touch_pins[0])),
                                   "touch pins hi-Z");
     first_error = safe_state_note(first_error,
                                   tristate_pins(s_display_pins,
-                                                sizeof(s_display_pins) /
-                                                sizeof(s_display_pins[0])),
+                                          sizeof(s_display_pins) /
+                                          sizeof(s_display_pins[0])),
                                   "LCD interface pins hi-Z");
     first_error = safe_state_note(first_error,
                                   tristate_pins(s_audio_pins,
-                                                sizeof(s_audio_pins) /
-                                                sizeof(s_audio_pins[0])),
+                                          sizeof(s_audio_pins) /
+                                          sizeof(s_audio_pins[0])),
                                   "audio interface pins hi-Z");
     first_error = safe_state_note(first_error,
                                   tristate_pins(s_sd_pins,
-                                                sizeof(s_sd_pins) /
-                                                sizeof(s_sd_pins[0])),
+                                          sizeof(s_sd_pins) /
+                                          sizeof(s_sd_pins[0])),
                                   "SD card pins hi-Z");
 
     /* Display rails in the required power-down order: VCI first, at least
@@ -292,8 +292,8 @@ esp_err_t bsp_power_safe_state(void)
     const gpio_num_t rgb_pin[] = { BSP_LED_RGB_IO };
     first_error = safe_state_note(first_error,
                                   tristate_pins(rgb_pin,
-                                                sizeof(rgb_pin) /
-                                                sizeof(rgb_pin[0])),
+                                          sizeof(rgb_pin) /
+                                          sizeof(rgb_pin[0])),
                                   "RGB data hi-Z");
 
     /* These rails feed only optional peripherals in schematic revision 0.5.
@@ -331,7 +331,7 @@ esp_err_t bsp_power_domain_set(bsp_power_domain_t domain, bool enable)
                             enable ? config->enabled_level : !config->enabled_level);
     if (error == ESP_OK) {
         s_domain_states[domain] = enable ? BSP_POWER_DOMAIN_STATE_ON
-                                         : BSP_POWER_DOMAIN_STATE_OFF;
+                                  : BSP_POWER_DOMAIN_STATE_OFF;
     }
     return error;
 }
@@ -491,10 +491,10 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
              * mounted, so this only covers the unmounted idle state. */
             const gpio_config_t detect_config = {
                 .pin_bit_mask = 1ULL << BSP_SD_DET,
-                .mode = GPIO_MODE_INPUT,
-                .pull_up_en = GPIO_PULLUP_ENABLE,
-                .pull_down_en = GPIO_PULLDOWN_DISABLE,
-                .intr_type = GPIO_INTR_DISABLE,
+                                     .mode = GPIO_MODE_INPUT,
+                                     .pull_up_en = GPIO_PULLUP_ENABLE,
+                                     .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                                     .intr_type = GPIO_INTR_DISABLE,
             };
             esp_err_t error = gpio_config(&detect_config);
             if (error == ESP_OK) {
@@ -518,8 +518,8 @@ esp_err_t bsp_peripheral_power_set(bsp_peripheral_t peripheral, bool enable)
         esp_err_t sd_error = safe_state_note(
                                  ESP_OK,
                                  tristate_pins(s_sd_pins,
-                                         sizeof(s_sd_pins) /
-                                         sizeof(s_sd_pins[0])),
+                                               sizeof(s_sd_pins) /
+                                               sizeof(s_sd_pins[0])),
                                  "SD card pins hi-Z");
         sd_error = safe_state_note(
                        sd_error,

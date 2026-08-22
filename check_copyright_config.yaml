@@ -44,3 +44,7 @@ ignore:  # You can also select ignoring files here
   perform_check: no  # Don't check files from that block
   include:
     - docu/
+    # Local-only: GPL-origin vendor fuel-gauge reference data. Excluded from
+    # any upstream submission; see the provenance header in the .c file.
+    - bsp/candis_s31/src/bsp_pmic_reference_model.c
+    - bsp/candis_s31/priv_include/bsp_pmic_reference_model.h

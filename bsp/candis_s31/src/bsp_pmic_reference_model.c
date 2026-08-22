@@ -29,11 +29,11 @@
 #include "bsp_pmic_reference_model.h"
 
 _Static_assert(sizeof(bsp_pmic_reference_battery_model) ==
-                   BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE,
+               BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE,
                "vendor reference battery model must stay exactly 128 bytes");
 
 const uint8_t bsp_pmic_reference_battery_model[
-    BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE] = {
+     BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE] = {
     0x01, 0xF5, 0x00, 0x00, 0xFB, 0x00, 0x00, 0xFB,
     0x00, 0x1E, 0x32, 0x01, 0x14, 0x04, 0xD8, 0x04,
     0x74, 0xFD, 0x58, 0x0B, 0xB3, 0x10, 0x3F, 0xFB,

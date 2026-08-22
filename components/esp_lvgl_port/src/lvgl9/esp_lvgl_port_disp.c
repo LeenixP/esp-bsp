@@ -903,7 +903,7 @@ static void lvgl_port_flush_direct_band(lv_display_t *drv, const lv_area_t *area
     const size_t px_size = lv_color_format_get_size(lv_display_get_color_format(drv));
     uint8_t *band = color_map + (size_t)y1 * (size_t)hres * px_size;
     const esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle,
-                                                         0, y1, hres, y2 + 1, band);
+                               0, y1, hres, y2 + 1, band);
     if (draw_err != ESP_OK) {
         ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
         /* Keep the pipeline unblocked: the flush-wait hook of the next cycle
@@ -1016,8 +1016,8 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
         if (is_last_flush) {
             /* If the interface is I80 or SPI, this step cannot be used for drawing. */
             esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, 0, 0,
-                                                           lv_disp_get_hor_res(drv), lv_disp_get_ver_res(drv),
-                                                           color_map);
+                                 lv_disp_get_hor_res(drv), lv_disp_get_ver_res(drv),
+                                 color_map);
             if (draw_err != ESP_OK) {
                 ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
                 /* No completion ISR will fire: release one count so the next
@@ -1034,7 +1034,7 @@ static void lvgl_port_flush_callback(lv_display_t *drv, const lv_area_t *area, u
             xSemaphoreTake(disp_ctx->trans_sem, 0);
         }
         esp_err_t draw_err = esp_lcd_panel_draw_bitmap(disp_ctx->panel_handle, offsetx1, offsety1,
-                                                       offsetx2 + 1, offsety2 + 1, color_map);
+                             offsetx2 + 1, offsety2 + 1, color_map);
         if (draw_err != ESP_OK) {
             ESP_LOGE(TAG, "Panel transfer failed: %s", esp_err_to_name(draw_err));
             /* Keep the flush-wait hook of the next cycle from blocking on a

@@ -188,8 +188,8 @@ esp_err_t bsp_pmic_init(void)
          * with this generic model is reference-grade; a different battery
          * SKU/chemistry needs a new model, not per-unit calibration. */
         const esp_err_t model_err = tg28_sw_program_battery_model(
-            s_pmic, bsp_pmic_reference_battery_model,
-            BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE);
+                                        s_pmic, bsp_pmic_reference_battery_model,
+                                        BSP_PMIC_REFERENCE_BATTERY_MODEL_SIZE);
         if (model_err == ESP_OK) {
             s_fuel_gauge_valid = true;
             s_fuel_gauge_reference_model = true;
@@ -219,7 +219,7 @@ esp_err_t bsp_pmic_init(void)
     }
     if (error == ESP_OK) {
         error = tg28_sw_configure_power_key_interrupts(s_pmic,
-                                                       TG28_SW_POWER_KEY_IRQ_ALL);
+                TG28_SW_POWER_KEY_IRQ_ALL);
     }
     if (error == ESP_OK) {
         /* Board-level choice: the Candis-S31 battery has no NTC resistor,
@@ -397,7 +397,7 @@ esp_err_t bsp_pmic_program_battery_model(const uint8_t *model, size_t size)
     s_fuel_gauge_valid = false;
     s_fuel_gauge_reference_model = false;
     const esp_err_t error = tg28_sw_program_battery_model(s_pmic, model,
-                                                          size);
+                            size);
     if (error == ESP_OK) {
         /* A full custom model is now verified in the gauge: valid, and
          * explicitly not the BSP reference default. */
@@ -489,7 +489,7 @@ esp_err_t bsp_pmic_read_adc_mv(bsp_pmic_adc_channel_t channel,
     const tg28_sw_adc_channel_t adc = (tg28_sw_adc_channel_t)channel;
     bool was_enabled = false;
     ESP_RETURN_ON_ERROR(tg28_sw_get_adc_channel_enable(s_pmic, adc,
-                                                       &was_enabled),
+                        &was_enabled),
                         TAG, "ADC channel state read failed");
     if (!was_enabled) {
         ESP_RETURN_ON_ERROR(tg28_sw_set_adc_channel_enable(s_pmic, adc, true),

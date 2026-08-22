@@ -72,8 +72,8 @@ esp_err_t bsp_led_indicator_create(led_indicator_handle_t led_array[],
     for (int index = 0; index < BSP_LED_NUM; ++index) {
         const esp_err_t led_error =
             led_indicator_new_strips_device(&s_indicator_config,
-                                &s_rgb_config,
-                                &led_array[index]);
+                                            &s_rgb_config,
+                                            &led_array[index]);
         if (led_error != ESP_OK) {
             /* Roll back the DC1SW switch so a failed init does not leave
              * the RGB LED rail powered with no active consumer. */
