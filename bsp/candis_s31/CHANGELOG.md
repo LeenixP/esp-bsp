@@ -1,5 +1,11 @@
 # ChangeLog
 
+## Unreleased
+
+### Fixed
+
+* Camera: drive the OV5640 XCLK from LEDC instead of the CAM controller. The esp_video DVP clock path (`esp_cam_ctlr_dvp_output_clock()`) only supports integer dividers and no ESP32-S31 CAM controller clock source is an integer multiple of the required 24 MHz (PLL_F160M 160 % 24 = 16, XTAL 40 % 24 = 16), so `esp_video_init_with_flags()` hard-failed with "calculated frequency divider is not integer" before any sensor detection; `CONFIG_BSP_CAMERA_XCLK_USE_LEDC` is now enabled by default and the BSP passes `xclk_io=GPIO_NUM_NC` / `xclk_freq=0` to esp_video so the controller clock path is skipped entirely. This supersedes the v1.2.0 "XCLK is no longer driven twice" entry, which was written against a fractional-divider assumption that does not hold on the S31 silicon/driver
+
 ## v1.2.0 - 2026-08-22
 
 ### Features
