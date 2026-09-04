@@ -11,11 +11,12 @@ management, an RTC, two USB Type-C connectors, an ES8389 audio codec, a DVP
 camera connector, a microSD slot, and one addressable RGB LED.
 
 This BSP follows schematic revision 0.5. The implementation and examples are
-compile-tested with ESP-IDF 6.1, and the EVT1 hardware has completed bring-up
-for the display, touch, audio, storage, USB, camera, RTC, and PMIC domains.
-The corrected camera FPC adapter board is fitted: DVP streaming, color-bar
-capture, and on-display preview are verified on EVT1 hardware; treat
-remaining electrical-behavior notes as EVT1-validated unless marked otherwise.
+compile-tested with ESP-IDF 6.1. EVT1 hardware has recorded validation for the
+display, touch, storage, USB, RTC, and PMIC domains; ES8389 initialization and
+digital-path checks pass, while speaker/microphone listening acceptance remains
+open. The corrected camera FPC adapter is fitted and DVP streaming plus the
+color-bar path are verified; real-scene image quality and JPEG capture remain
+EVT-specific validation items.
 
 ## Capabilities and dependencies
 
