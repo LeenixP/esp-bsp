@@ -328,15 +328,15 @@ typedef struct {
     uint8_t common_status1;
     uint16_t battery_mv;
     /** TG28 SOC estimate; only meaningful when fuel_gauge_valid is true
-     *  (a programmed battery model). Treat it as meaningless data
-     *  otherwise - never convert battery_mv into a percentage instead. */
+     * (the factory ROM model was verified or a custom model was programmed).
+     * Treat it as meaningless otherwise; never derive a percentage from
+     * battery_mv here. */
     uint8_t battery_percent;
-    /** True only after a battery model was successfully programmed in
-     *  this boot (BSP reference default or a runtime override). */
+    /** True after the factory ROM model is verified or a custom battery model
+     * is successfully programmed in this boot. */
     bool fuel_gauge_valid;
-    /** True while the active valid model is the BSP reference default
-     *  (vendor generic 4.2 V-class): SOC is reference accuracy, not
-     *  per-battery calibrated. False means a custom model (or none). */
+    /** True while the active valid model is the TG28 factory ROM model.
+     * False means a custom model is active or no model is valid. */
     bool fuel_gauge_reference_model;
     bool battery_present;
     bool vbus_present;
@@ -440,13 +440,14 @@ typedef enum {
 } bsp_type_c_role_t;
 
 /** Board source policy accepts only USB Type-C default current (500 mA).
- *  The higher enum values report the attached partner's advertised capability
- *  through bsp_type_c_status_t.advertised_current; passing them to a board role
- *  or VBUS API fails with ESP_ERR_NOT_SUPPORTED. */
+ *  Status reports preserve the partner advertisement, including NONE for Ra
+ *  or no attachment; passing any non-default value to a board role or VBUS
+ *  API fails with ESP_ERR_NOT_SUPPORTED. */
 typedef enum {
     BSP_TYPE_C_CURRENT_DEFAULT = 0,
     BSP_TYPE_C_CURRENT_1_5_A,
     BSP_TYPE_C_CURRENT_3_0_A,
+    BSP_TYPE_C_CURRENT_NONE,
 } bsp_type_c_current_t;
 
 /** FUSB303B connection snapshot. */

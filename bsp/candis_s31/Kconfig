@@ -78,6 +78,17 @@ menu "Board Support Package (Candis-S31)"
                 require a persistent framebuffer. The validated default is
                 PARTIAL double buffering, which has lower local-update latency;
                 leave this disabled unless the DIRECT path is tested separately.
+        config BSP_DISPLAY_ROTATE_180
+            bool "Rotate panel scan and touch by 180 degrees"
+            default y
+            help
+                EVT1 mounts the AMOLED module upside down. When enabled the
+                CO5300 MADCTL (0x36) MX|MY bits flip the panel scan direction
+                with no rendering cost; LVGL PARTIAL, TE sync and the QSPI
+                DMA pipeline are unchanged. CST820 raw coordinates are
+                mirrored in software so touches match the rotated view.
+                Disable only for a board spin that mounts the panel upright.
+
     endmenu
 
     menu "Storage"

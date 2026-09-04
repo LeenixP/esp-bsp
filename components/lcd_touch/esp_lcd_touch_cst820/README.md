@@ -13,13 +13,11 @@ publish the complete touch report register map. This driver follows the
 slots beginning at bytes 3 and 9. It does not probe CST816-family addresses,
 alias CST816 registers, or fall back to a CST816 compatibility path. Driver
 initialization is limited to reset and an optional ID read; it does not change
-auto-sleep or interrupt-mode registers. The only command write is the sleep
-command used by the power-management APIs below, and its register is an
-assumption pending EVT verification.
+auto-sleep or interrupt-mode registers and sends no command writes.
 
-If the controller is asleep or its firmware does not expose register `0xA7`,
-enable `CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID`. Touch data can still be
-read after the controller wakes on a touch event.
+If the controller firmware does not expose register `0xA7`, enable
+`CONFIG_ESP_LCD_TOUCH_CST820_DISABLE_READ_ID`. Touch data can still be read
+after the controller returns to dynamic mode on a touch event.
 
 ## Add the component
 
@@ -62,8 +60,9 @@ const esp_lcd_panel_io_i2c_config_t io_config =
 ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_config, &touch_io));
 
 const esp_lcd_touch_config_t touch_config = {
-    .x_max = 460,
-    .y_max = 460,
+    /* Coordinate maxima are inclusive; 460x460 uses 0..459. */
+    .x_max = 459,
+    .y_max = 459,
     .rst_gpio_num = GPIO_NUM_7,
     .int_gpio_num = GPIO_NUM_3,
     .levels = {
@@ -77,6 +76,7 @@ const esp_lcd_touch_config_t touch_config = {
     },
 };
 ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst820(touch_io, &touch_config, &touch));
+
 ```
 
 GPIO numbers in the example are placeholders. Use the reset, interrupt, SDA,
@@ -85,6 +85,11 @@ and SCL pins from the target board schematic. Set either reset or interrupt to
 
 The reset and interrupt active levels are provided by the board through
 `touch_config.levels`; the driver does not assume a fixed module wiring.
+The common `esp_lcd_touch_enter_sleep()` and `esp_lcd_touch_exit_sleep()`
+wrappers are supported by this driver and map to the monitor-mode helpers.
+Monitor mode deliberately relies on the controller's documented automatic
+standby path; it keeps the interrupt wake signal active without an
+undocumented register write.
 
 ## Read touch points
 
@@ -116,28 +121,12 @@ read. Do not access I2C directly from the ISR.
 ## Power management
 
 The CST820 has three power modes (DS_CST_820 V1.2): dynamic (~1.9 mA),
-standby (~10 uA) and deep sleep (~2 uA). The driver exposes both low-power
-tiers through explicit APIs that are equivalent to, or build on, the
-`esp_lcd_touch` sleep hooks.
-
-### Deep sleep (`esp_lcd_touch_cst820_sleep()` / `esp_lcd_touch_cst820_wakeup()`)
-
-`esp_lcd_touch_cst820_sleep()` (equivalent to
-`esp_lcd_touch_enter_sleep()`) sends the controller sleep command; the
-controller stops scanning and stops answering I2C. Its INT pin is inactive
-in this mode, so **a touch cannot wake the controller or the host from deep
-sleep** — wake-up is only possible through `esp_lcd_touch_cst820_wakeup()`
-(equivalent to `esp_lcd_touch_exit_sleep()`: a hardware reset cycle,
-Tron = 100 ms) or by power-cycling the touch supply rail.
-Use this tier for shipping/storage states.
-
-The sleep command register is not published in the datasheet. The driver
-uses `0xA5 <- 0x03`, taken from public CST816-family sources; public
-sources disagree (DriveBus documents `0xE5 <- 0x03` as the sleep command
-instead). **This register is an assumption pending EVT verification** — see
-the provenance comment in `esp_lcd_touch_cst820.c`. Wake-up deliberately
-uses only the datasheet-sanctioned reset path, which works regardless of
-whether the sleep command took effect.
+standby (~10 uA) and deep sleep (~2 uA). The datasheet states that sleep mode
+is entered through a "sleep command" but does not publish the register map;
+commands reconstructed from public CST816-family sources (`0xA5 <- 0x03` and
+`0xE5 <- 0x03`) were verified on hardware to leave the controller answering
+I2C unchanged, so this driver provides no deep-sleep API. Monitor (standby)
+mode is the supported low-power tier.
 
 ### Monitor / standby mode (`esp_lcd_touch_cst820_enter_monitor_mode()` /
 `esp_lcd_touch_cst820_exit_monitor_mode()`)
@@ -149,8 +138,7 @@ INT to wake the host. Per the datasheet the controller enters standby
 automatically when no touch is detected for 2 s, so no undocumented
 register write is needed and the driver sends none.
 
-Typical low-power sequence (verified on a Candis-S31 board, INT = GPIO3,
-active low):
+Typical low-power sequence (verified on hardware, INT active low):
 
 ```c
 /* 1. Arm monitor mode; the controller reaches standby <= 2 s after the

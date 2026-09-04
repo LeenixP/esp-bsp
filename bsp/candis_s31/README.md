@@ -86,31 +86,29 @@ init and deletes the handle): REG62 charge current to
 reset, so a ceiling raised by an earlier session is collapsed before a weak
 source can be plugged in), REG64 charge voltage to
 `BSP_PMIC_SAFE_CHARGE_VOLTAGE_MV` (4200 mV; POR is unspecified and the
-vendor FAQ requires the register to match the fuel-gauge model CV or the
-SOC jumps), REG61 precharge to 50 mA and REG63 termination to 25 mA with
+vendor FAQ requires the register to match the fuel-gauge model CV or the SOC
+jumps), REG61 precharge to 50 mA and REG63 termination to 25 mA with
 termination enabled (vendor EVB recipe, manual section 4.5 step 5). The
 matching public setters/getters are `bsp_pmic_set/get_charge_current`,
 `bsp_pmic_set/get_charge_voltage`,
 `bsp_pmic_set/get_precharge_current` and
-`bsp_pmic_set/get_termination_current`. Init then programs the built-in
-reference fuel-gauge model best-effort
-(`src/bsp_pmic_reference_model.c`): the vendor generic 4.2 V-class
-fallback, GPL-origin data that is NOT Apache-2.0 - redistribution requires
-a license review, and replacing it with a properly licensed cell-specific
-model is an upstream/external-release blocker. SOC accuracy with the
-reference model is provisional; a materially different battery SKU or
-chemistry needs a new model, not per-unit calibration. A download failure
-only logs a warning; charging and the PMIC stay alive. A later
-cell-specific model can replace the reference at runtime through
-`bsp_pmic_program_battery_model()` (re-verifies; the driver-level
-create-time `battery_model` hook is unused because it fails the whole
-create on a download error). `bsp_pmic_status_t.fuel_gauge_valid` reports
-whether the SOC estimate is currently backed by a model and
-`fuel_gauge_reference_model` whether that model is the reference default
-(reference accuracy) or a custom override; when invalid, treat
-`battery_percent` as meaningless and never convert `battery_mv`
-into a percentage instead. Validity is dropped before a runtime override
-attempt and on init failure, so a partial download is never reported.
+`bsp_pmic_set/get_termination_current`.
+
+Init then verifies the TG28 factory ROM model without embedding its bytes: it
+reads the model once through `tg28_sw_read_battery_model()` and uses a
+successful read as the default model-availability check. The model bytes
+remain in the PMIC and are never copied into this Apache-2.0 BSP. A read
+failure only logs a warning; charging and the PMIC stay alive. A
+battery-specific model obtained under a compatible license can replace the
+factory model at runtime through `bsp_pmic_program_battery_model()` (the
+driver-level create-time `battery_model` hook is unused because it fails the
+whole create on a download error). `bsp_pmic_status_t.fuel_gauge_valid`
+reports whether the current model was successfully verified or programmed,
+and `fuel_gauge_reference_model` identifies the factory ROM model; when
+invalid, treat `battery_percent` as meaningless and never convert
+`battery_mv` into a percentage instead. Validity is dropped before a runtime
+override attempt and on init failure, so a partial download is never reported.
+
 
 `bsp_power_safe_state()` is a low-level best-effort rail/GPIO sweep. Stop
 active display, audio, camera, and USB owners first so they can release handles
@@ -122,14 +120,10 @@ and issue their protocol-level shutdown commands.
   AM200Q460460LK module supplier's reference material. Its license status is
   being confirmed with the supplier; treat the sequence as supplier-provided
   reference data until that confirmation is complete.
-- Touch support resolves `espressif/esp_lcd_touch_cst820` to the in-tree copy
-  under `components/lcd_touch/esp_lcd_touch_cst820` (Apache-2.0) through
-  `override_path` instead of pulling a registry package. The in-tree component
-  is a self-maintained implementation, independent of the same-named
-  `kodediy/esp_lcd_touch_cst820` registry package that earlier revisions of
-  this BSP referenced; it keeps the module-specific CST820 report handling
-  maintainable. It remains the Espressif `esp_lcd_touch` driver and is
-  functionally equivalent.
+- Touch support uses the published `espressif/esp_lcd_touch_cst820`
+  component (Apache-2.0), which follows the module-specific CST820 report
+  format and exposes the common `esp_lcd_touch` API. Its framework sleep hooks
+  map to the documented monitor-mode entry/exit helpers.
 
 ## Compatible BSP examples
 
