@@ -228,6 +228,9 @@
 #define BSP_CAMERA_VSYNC                       GPIO_NUM_56
 #define BSP_CAMERA_HSYNC                       GPIO_NUM_57
 #define BSP_CAMERA_DEVICE                      ESP_VIDEO_DVP_DEVICE_NAME
+/** Nominal XCLK used by the selected OV5640 register-table identifier (MHz).
+ * EVT1's LEDC workaround runs at 20 MHz nominal, measured about 20.1 MHz;
+ * this value must not be read as an exact runtime clock measurement. */
 #define BSP_CAMERA_XCLK_CLOCK_MHZ              24
 /** @} */
 
